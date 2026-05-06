@@ -129,6 +129,16 @@ SEO_MAX_TAGS = int(os.environ.get("SEO_MAX_TAGS", "15"))
 SEO_TITLE_MAX_LEN = int(os.environ.get("SEO_TITLE_MAX_LEN", "90"))
 SEO_DESCRIPTION_MAX_LEN = int(os.environ.get("SEO_DESCRIPTION_MAX_LEN", "500"))
 
+# Publisher stage. DRY-RUN packages metadata + clip into a release dir;
+# real uploaders are separate tentacles that consume that release.
+RELEASES_DIR = DATA_DIR / "releases"
+RELEASES_DIR.mkdir(parents=True, exist_ok=True)
+# When True (default) we never call upload APIs — just stage the files.
+PUBLISHER_DRY_RUN = os.environ.get("PUBLISHER_DRY_RUN", "true").lower() != "false"
+# Default privacy status on YouTube; user flips to public manually.
+PUBLISHER_YT_PRIVACY = os.environ.get("PUBLISHER_YT_PRIVACY", "private")
+PUBLISHER_YT_CATEGORY_ID = os.environ.get("PUBLISHER_YT_CATEGORY_ID", "22")
+
 EXEC_TIMEOUT = int(os.environ.get("EXEC_TIMEOUT", "30"))
 MAX_FILE_BYTES = int(os.environ.get("MAX_FILE_BYTES", "200000"))
 HISTORY_LIMIT = int(os.environ.get("HISTORY_LIMIT", "20"))
