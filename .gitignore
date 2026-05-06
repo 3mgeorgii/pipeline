@@ -1,0 +1,25 @@
+# Локальные секреты и состояние
+.env
+.env.local
+data/
+*.log
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.venv/
+venv/
+env/
+.Python
+build/
+dist/
+*.egg-info/
+
+# Editors
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store

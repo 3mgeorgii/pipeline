@@ -1,0 +1,156 @@
+# codesp-bot-starter
+
+Стартер для **самохостящегося Telegram-бота с AI-агентом**.
+Деплоится на любое облако (Render, Railway, Fly.io, Heroku, VPS) **с одним секретом — `BOT_TOKEN`**. Всё остальное (LLM-провайдер, API-ключ, модель) настраивается **изнутри Telegram через кнопки**.
+
+## 🎯 3 шага до работающего бота
+
+### 1. Создай свой Telegram-бот
+
+1. Открой [@BotFather](https://t.me/BotFather) в Telegram
+2. `/newbot` → придумай имя и username
+3. Сохрани **BOT_TOKEN** (формат `1234567890:AAH...`)
+
+### 2. Залей этот стартер в свой GitHub-репо
+
+**Вариант А — через web-интерфейс GitHub** (самый простой, без терминала):
+
+1. Открой <https://github.com/new>, придумай имя репо (любое)
+   - **ВАЖНО**: НЕ ставь галочки на "Add a README file", ".gitignore" и "license" —
+     иначе репо не будет пустым и трюк ниже не сработает
+2. Нажми **Create repository**
+3. На пустой странице нового репо нажми ссылку **uploading an existing file**
+   (она в первом параграфе "Quick setup")
+4. Распакуй `codesp-bot-starter.zip` у себя на компе → перетащи в окно загрузки
+   **содержимое** папки `codesp-bot-starter/` (Dockerfile, render.yaml, bot/, и т.д.) —
+   именно файлы и папку `bot/`, а не саму папку `codesp-bot-starter/`
+5. Внизу нажми **Commit changes**
+
+Готово. Все файлы (Dockerfile, render.yaml, bot/...) теперь у тебя в репо.
+
+> Если перетаскивание папки `bot/` не срабатывает — drag&drop папок зависит от браузера.
+> Используй Chrome (стабильнее всех) или Вариант Б через терминал.
+
+**Вариант Б — через терминал** (если есть git):
+```bash
+unzip codesp-bot-starter.zip
+cd codesp-bot-starter
+git init
+git add .
+git commit -m "init"
+git remote add origin https://github.com/<your-username>/<repo-name>.git
+git branch -M main
+git push -u origin main
+```
+
+### 3. Развернуть в облаке
+
+Выбери один:
+
+#### Render (рекомендую — проще всего, бесплатно)
+
+1. <https://dashboard.render.com> → **New +** → **Blueprint**
+2. **Connect a repository** → найди свой свежий репо → **Connect**
+3. Render прочитает `render.yaml` и попросит ввести `BOT_TOKEN` → вставь свой
+4. **Apply** — жди 2-4 минуты
+
+#### Railway
+
+1. <https://railway.app/new> → **Deploy from GitHub repo** → пик свой репо
+2. После создания → **Variables** → добавь `BOT_TOKEN=<токен>`
+3. Авто-деплой стартанёт сам
+
+#### Fly.io (всегда-on, не засыпает)
+
+```bash
+curl -L https://fly.io/install.sh | sh
+fly auth signup
+fly launch --copy-config --name <уникальное-имя>
+fly secrets set BOT_TOKEN=<токен>
+fly deploy
+```
+
+#### Свой VPS
+
+```bash
+git clone https://github.com/<your-username>/<repo-name>.git
+cd <repo-name>
+docker build -t codesp-bot .
+docker run -d --name codesp-bot --restart unless-stopped \
+  -p 8080:8080 \
+  -e BOT_TOKEN="<токен>" \
+  -v $(pwd)/data:/data \
+  codesp-bot
+```
+
+---
+
+## 🤖 Активация в Telegram
+
+После того как контейнер поднялся:
+
+1. Открой свой бот в Telegram (по username)
+2. Отправь `/start`
+3. Нажми кнопку **🚀 Запустить и стать владельцем**
+   → ты теперь единственный пользователь, кто может с ним общаться
+4. Появится меню выбора «мозга» — 3 кнопки:
+   - **🧠 OpenRouter** (рекомендую) — нажми её
+   - **🛠 Devin.ai** — для случая когда ты хочешь подключить Devin как агента
+   - **🔌 Другое** — для self-hosted endpoint-ов (vLLM, Ollama, Groq и т.д.)
+5. В подменю нажми **🔑 API ключ** → вставь свой ключ (получить: <https://openrouter.ai/keys>)
+6. **✅ Готово** — пиши боту любой текст, он отвечает через LLM
+
+---
+
+## 📂 Структура
+
+```
+.
+├── README.md              ← этот файл
+├── Dockerfile             ← образ контейнера
+├── requirements.txt       ← Python deps
+├── .env.example           ← шаблон env-переменных (для локального запуска)
+├── .gitignore
+├── render.yaml            ← Render Blueprint
+├── railway.json           ← Railway service config
+├── fly.toml               ← Fly.io app config
+└── bot/                   ← Python-пакет
+    ├── __init__.py
+    ├── main.py            ← entrypoint (запускает polling + health-сервер)
+    ├── config.py          ← env-vars
+    ├── handlers.py        ← /help, /clone, /exec, /git и тексты
+    ├── wizard.py          ← /start, /setup, FSM, кнопки выбора мозга
+    ├── storage.py         ← persistent state в data/state.json
+    ├── agent.py           ← LLM-агент (OpenRouter / OpenAI-compatible)
+    ├── tools.py           ← list_dir / read_file / write_file / exec_bash
+    ├── inbox.py           ← лог входящих для devin-brain режима
+    └── send.py            ← CLI: python -m bot.send <chat_id> "msg"
+```
+
+---
+
+## 🔐 Безопасность
+
+- **Owner-claim**: первый пользователь, который нажмёт кнопку запуска, становится **единственным**, кто может говорить с ботом. Все остальные получают «принадлежит другому владельцу».
+- API-ключи **не хранятся в env-vars** на облаке — только в `data/state.json` внутри контейнера. Сообщение пользователя с ключом удаляется ботом сразу после получения.
+- Файл `data/state.json` имеет права `0600` (чтение только владельцу процесса).
+- `exec_bash` как tool — это полный shell без sandbox. Whitelist через owner-claim **обязателен**.
+
+## 🆘 Troubleshooting
+
+| Проблема | Решение |
+|---|---|
+| `KeyError: 'BOT_TOKEN'` в логах | Не задал env-var → добавь и передеплой |
+| `TelegramUnauthorizedError` | Токен неверный → перевыпусти через `/revoke` в @BotFather |
+| Кнопки не работают в группах | @BotFather → `/setprivacy` → твой бот → **Disable** |
+| «уже привязан к другому владельцу» | Кто-то нажал первым (или старый state). Зайди в shell контейнера → `rm /data/state.json` → передеплой |
+| Render Free засыпает | По умолчанию **уже включён self-ping** на `/healthz` каждые 4-7 минут (рандомно, со смещением к 7) — Render таймер засыпания 15 минут, поэтому бот не должен спать. Если всё равно засыпает: проверь `RENDER_EXTERNAL_URL` в env или задай `KEEP_ALIVE_URL=https://<твой-сервис>.onrender.com` явно. Если нужно отключить (например, на Fly или своём VPS) — `KEEP_ALIVE_INTERVAL=0` |
+
+---
+
+## Что дальше
+
+- В TG: `/help` — список команд
+- `/setup` — заново выбрать мозг и поменять ключи
+- `/setbrain devin` — переключить в режим «Devin отвечает за меня» (нужна параллельная сессия Devin с шелл-доступом)
+- `/keys`, `/setkey`, `/models`, `/setmodel` — низкоуровневое управление ключами и моделями

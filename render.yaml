@@ -1,0 +1,21 @@
+# Render Blueprint — https://render.com/docs/infrastructure-as-code
+#
+# Usage: at https://dashboard.render.com → New + → Blueprint → connect repo
+# → Render reads this file and asks for BOT_TOKEN.
+services:
+  - type: web
+    name: codesp-bot
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /healthz
+    plan: free
+    autoDeploy: true
+    envVars:
+      - key: BOT_TOKEN
+        sync: false        # Render will ask the user for this value
+      - key: BOT_MODE
+        value: polling
+      - key: PORT
+        value: 8080
+      - key: DATA_DIR
+        value: /data
