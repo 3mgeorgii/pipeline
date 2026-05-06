@@ -12,7 +12,6 @@ import pytest
 from bot.jobs import Job, JobQueue
 from bot.workers.analyzer import AnalyzerWorker
 from bot.workers.base import Worker
-from bot.workers.downloader import DownloaderWorker
 from bot.workers.editor import EditorWorker
 from bot.workers.seo import SeoWorker
 
@@ -145,9 +144,14 @@ async def test_worker_chains_to_next_kind(queue: JobQueue) -> None:
 
 
 async def test_full_pipeline_runs_through_stages(queue: JobQueue) -> None:
-    """Smoke test: a /dl-style download job lands at the publish stage."""
+    """Smoke test: starting at ``analyze`` we end with 3 publish jobs queued.
+
+    We skip the ``download`` stage here because :class:`DownloaderWorker` now
+    really shells out to yt-dlp; coverage for it lives in
+    ``tests/test_downloader.py``. This test still covers the orchestration
+    contract: 1 analyze → 3 edit → 3 seo → 3 publish via parent_id chains.
+    """
     workers = [
-        DownloaderWorker(queue, poll_interval_s=0.05),
         AnalyzerWorker(queue, poll_interval_s=0.05),
         EditorWorker(queue, poll_interval_s=0.05),
         SeoWorker(queue, poll_interval_s=0.05),
@@ -155,10 +159,12 @@ async def test_full_pipeline_runs_through_stages(queue: JobQueue) -> None:
     tasks = [asyncio.create_task(w.run()) for w in workers]
 
     job_id = await queue.enqueue(
-        "download", {"url": "https://example.com/movie.mp4"}, chat_id=999
+        "analyze",
+        {"source_path": "/tmp/lilush/sources/fake.mp4", "duration_s": 5400},
+        chat_id=999,
     )
 
-    # Wait for the chain: download → analyze → 3 edit → 3 seo → 3 publish (queued).
+    # Wait for the chain: analyze → 3 edit → 3 seo → 3 publish (queued).
     deadline = asyncio.get_event_loop().time() + 30.0
     try:
         while asyncio.get_event_loop().time() < deadline:
@@ -176,10 +182,11 @@ async def test_full_pipeline_runs_through_stages(queue: JobQueue) -> None:
                 await t
 
     jobs = await queue.list_by_chat(999, limit=50)
-    by_kind = {k: [j for j in jobs if j.kind == k] for k in ("download", "analyze", "edit", "seo", "publish")}
+    by_kind = {
+        k: [j for j in jobs if j.kind == k]
+        for k in ("analyze", "edit", "seo", "publish")
+    }
 
-    assert len(by_kind["download"]) == 1
-    assert by_kind["download"][0].status == "done"
     assert len(by_kind["analyze"]) == 1
     assert by_kind["analyze"][0].status == "done"
     assert len(by_kind["edit"]) == 3

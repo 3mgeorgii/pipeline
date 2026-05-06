@@ -23,9 +23,10 @@ class AnalyzerWorker(Worker):
     next_kind = "edit"
 
     async def process(self, job: Job) -> dict[str, Any]:
-        source_path = job.payload.get("file_path")
+        # Downloader emits ``source_path``; older callers used ``file_path``.
+        source_path = job.payload.get("source_path") or job.payload.get("file_path")
         if not source_path:
-            raise ValueError("analyze payload missing 'file_path'")
+            raise ValueError("analyze payload missing 'source_path'")
         logger.info("[stub] would analyze %s", source_path)
         await asyncio.sleep(1)
         clips = [
