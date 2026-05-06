@@ -142,15 +142,32 @@ async def test_worker_chains_to_next_kind(queue: JobQueue) -> None:
     assert child.payload == {"echoed": {"x": 1}}
 
 
-async def test_full_pipeline_runs_through_stages(queue: JobQueue) -> None:
-    """Smoke test: starting at ``edit`` we land at 3 publish jobs queued.
+async def test_full_pipeline_runs_through_stages(
+    queue: JobQueue, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Smoke test: ``edit → seo → publish`` chain across real workers.
 
     Earlier stages (``download``, ``analyze``) shell out to yt-dlp, ffmpeg,
-    faster-whisper, and pyscenedetect, so they need filesystem fixtures.
-    Their orchestration is covered by their own test modules:
-    ``tests/test_downloader.py`` and ``tests/test_analyzer.py``. Here we
-    just exercise the ``edit → seo → publish`` chain.
+    faster-whisper, and pyscenedetect, so they're covered by their own
+    test modules (``tests/test_downloader.py``, ``tests/test_analyzer.py``).
+    Here we exercise the editor→seo→publish portion using a fake source
+    file and a stubbed ffmpeg.
     """
+    import subprocess
+
+    from bot.workers import editor as editor_mod
+
+    src = tmp_path / "source.mp4"
+    src.write_bytes(b"\x00fake")
+
+    def fake_run(cmd: list[str], **kwargs: Any) -> subprocess.CompletedProcess[bytes]:
+        if cmd and cmd[-1].endswith(".mp4"):
+            Path(cmd[-1]).write_bytes(b"\x00mp4")
+        return subprocess.CompletedProcess(cmd, returncode=0, stdout=b"", stderr=b"")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    monkeypatch.setattr(editor_mod._config, "OVERLAY_LOGO_PATH", "")
+
     workers = [
         EditorWorker(queue, poll_interval_s=0.05),
         SeoWorker(queue, poll_interval_s=0.05),
@@ -158,7 +175,7 @@ async def test_full_pipeline_runs_through_stages(queue: JobQueue) -> None:
     tasks = [asyncio.create_task(w.run()) for w in workers]
 
     edit_payload_template = {
-        "source_path": "/tmp/lilush/sources/fake.mp4",
+        "source_path": str(src),
         "start_s": 0.0,
         "end_s": 30.0,
         "hook": "stub clip",

@@ -112,6 +112,17 @@ ANALYZER_CLIP_MAX_S = float(os.environ.get("ANALYZER_CLIP_MAX_S", "60"))
 # Threshold (0-100) for pyscenedetect's ContentDetector.
 SCENEDETECT_THRESHOLD = float(os.environ.get("SCENEDETECT_THRESHOLD", "27"))
 
+# Editor stage (ffmpeg crop / scale / overlay).
+EDITOR_OUTPUT_WIDTH = int(os.environ.get("EDITOR_OUTPUT_WIDTH", "1080"))
+EDITOR_OUTPUT_HEIGHT = int(os.environ.get("EDITOR_OUTPUT_HEIGHT", "1920"))
+EDITOR_VIDEO_CRF = int(os.environ.get("EDITOR_VIDEO_CRF", "23"))
+EDITOR_AUDIO_BITRATE = os.environ.get("EDITOR_AUDIO_BITRATE", "128k")
+EDITOR_VIDEO_PRESET = os.environ.get("EDITOR_VIDEO_PRESET", "medium")
+# Optional PNG (with alpha) burned into the bottom-right of every clip.
+# Empty == no overlay.
+OVERLAY_LOGO_PATH = os.environ.get("OVERLAY_LOGO_PATH", "").strip()
+OVERLAY_MARGIN_PX = int(os.environ.get("OVERLAY_MARGIN_PX", "40"))
+
 EXEC_TIMEOUT = int(os.environ.get("EXEC_TIMEOUT", "30"))
 MAX_FILE_BYTES = int(os.environ.get("MAX_FILE_BYTES", "200000"))
 HISTORY_LIMIT = int(os.environ.get("HISTORY_LIMIT", "20"))
