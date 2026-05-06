@@ -25,6 +25,7 @@ priority.
 
 from __future__ import annotations
 
+import contextlib
 import logging
 
 from aiogram import F, Router
@@ -350,10 +351,8 @@ async def capture_api_key(message: Message, state: FSMContext) -> None:
         await message.answer("Пустое сообщение, попробуй ещё раз или нажми «Сменить мозг».")
         return
     # Delete the message with the secret first, then save.
-    try:
+    with contextlib.suppress(Exception):
         await message.delete()
-    except Exception:  # noqa: BLE001
-        pass
     storage.set_provider_key(_provider_label_from_storage(), key)
     await state.clear()
     summary = _config_summary()
@@ -444,7 +443,7 @@ def _devin_handoff_prompt() -> str:
 
 ЧТО НА СЕРВЕРЕ
 - Бот развёрнут как Docker-контейнер. Код — в моём GitHub-репо (точную ссылку
-  я тебе дам отдельно, обычно это форк codesp-bot-starter).
+  я тебе дам отдельно, обычно это форк Lilush).
 - Внутри контейнера: /app/bot/  (Python-пакет с handlers, wizard, agent и т.д.)
 - Лог входящих сообщений: data/inbox.log  (бот пишет туда каждое моё сообщение)
 - Состояние (ключи, brain, owner): data/state.json

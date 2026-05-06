@@ -89,6 +89,10 @@ PROJECTS_DIR = DATA_DIR / "projects"
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 PROJECTS_DIR.mkdir(parents=True, exist_ok=True)
 
+# Lilush pipeline: SQLite-backed job queue + worker poll cadence.
+JOBS_DB_PATH = DATA_DIR / "jobs.db"
+WORKER_POLL_INTERVAL_S = float(os.environ.get("WORKER_POLL_INTERVAL_S", "1.0"))
+
 EXEC_TIMEOUT = int(os.environ.get("EXEC_TIMEOUT", "30"))
 MAX_FILE_BYTES = int(os.environ.get("MAX_FILE_BYTES", "200000"))
 HISTORY_LIMIT = int(os.environ.get("HISTORY_LIMIT", "20"))
@@ -96,4 +100,4 @@ AGENT_MAX_STEPS = int(os.environ.get("AGENT_MAX_STEPS", "8"))
 
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 HTTP_REFERER = os.environ.get("HTTP_REFERER", "https://github.com/")
-APP_TITLE = os.environ.get("APP_TITLE", "codesp telegram bot")
+APP_TITLE = os.environ.get("APP_TITLE", "Lilush")

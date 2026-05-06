@@ -4,7 +4,6 @@ from pathlib import Path
 
 from .config import EXEC_TIMEOUT, MAX_FILE_BYTES, PROJECTS_DIR
 
-
 TOOL_DEFINITIONS = [
     {
         "type": "function",
@@ -109,7 +108,7 @@ async def _run(cmd: list[str], cwd: Path | None = None, timeout: int = EXEC_TIME
     )
     try:
         stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
-    except asyncio.TimeoutError:
+    except TimeoutError:
         proc.kill()
         await proc.wait()
         return 124, "", f"timeout after {timeout}s"
@@ -125,7 +124,7 @@ async def _run_shell(command: str, cwd: Path | None, timeout: int = EXEC_TIMEOUT
     )
     try:
         stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
-    except asyncio.TimeoutError:
+    except TimeoutError:
         proc.kill()
         await proc.wait()
         return 124, "", f"timeout after {timeout}s"
@@ -194,7 +193,7 @@ async def dispatch_tool(name: str, args_json: str, cwd: Path | None) -> str:
     try:
         args = json.loads(args_json or "{}")
     except json.JSONDecodeError as exc:
-        raise ToolError(f"bad arguments json: {exc}")
+        raise ToolError(f"bad arguments json: {exc}") from exc
 
     if cwd is None:
         raise ToolError("No project selected. Use /clone or /project first.")

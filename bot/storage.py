@@ -1,3 +1,4 @@
+import contextlib
 import json
 import os
 from pathlib import Path
@@ -41,11 +42,9 @@ class Storage:
 
     def _save(self) -> None:
         self.state_file.write_text(json.dumps(self._state, ensure_ascii=False, indent=2))
-        try:
+        # Best-effort chmod — platforms without POSIX permissions silently fall through.
+        with contextlib.suppress(OSError):
             os.chmod(self.state_file, 0o600)
-        except OSError:
-            # Best-effort on platforms that don't support chmod.
-            pass
 
     # ---- per-user state -------------------------------------------------
 

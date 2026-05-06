@@ -5,7 +5,7 @@ bot is in ``brain=devin`` mode (see :func:`bot.storage.Storage.get_brain`).
 """
 
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from .config import DATA_DIR
@@ -27,7 +27,7 @@ def log_inbox(
     Best-effort: if the disk write fails (e.g. read-only fs) we log a warning
     but never raise — message handling must not be blocked by logging.
     """
-    timestamp = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    timestamp = datetime.now(UTC).isoformat(timespec="seconds")
     safe = (text or "").replace("\n", "\\n")
     line = f"{timestamp} [{kind}] from={user_id} chat={chat_id} text={safe!r}\n"
     try:

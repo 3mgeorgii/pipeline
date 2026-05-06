@@ -113,7 +113,7 @@ async def run_agent(user_id: int, user_text: str, cwd: Path | None) -> str:
     requested_model = storage.get_model() or DEFAULT_MODEL
     used_model = requested_model
 
-    for step in range(AGENT_MAX_STEPS):
+    for _step in range(AGENT_MAX_STEPS):
         msg, used_model = await _call_model(client, messages)
         tool_calls = getattr(msg, "tool_calls", None) or []
 
