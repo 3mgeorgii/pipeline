@@ -123,6 +123,12 @@ EDITOR_VIDEO_PRESET = os.environ.get("EDITOR_VIDEO_PRESET", "medium")
 OVERLAY_LOGO_PATH = os.environ.get("OVERLAY_LOGO_PATH", "").strip()
 OVERLAY_MARGIN_PX = int(os.environ.get("OVERLAY_MARGIN_PX", "40"))
 
+# SEO stage (pytrends + LLM-generated metadata).
+SEO_LLM_MODEL = os.environ.get("SEO_LLM_MODEL", "openai/gpt-4o-mini")
+SEO_MAX_TAGS = int(os.environ.get("SEO_MAX_TAGS", "15"))
+SEO_TITLE_MAX_LEN = int(os.environ.get("SEO_TITLE_MAX_LEN", "90"))
+SEO_DESCRIPTION_MAX_LEN = int(os.environ.get("SEO_DESCRIPTION_MAX_LEN", "500"))
+
 EXEC_TIMEOUT = int(os.environ.get("EXEC_TIMEOUT", "30"))
 MAX_FILE_BYTES = int(os.environ.get("MAX_FILE_BYTES", "200000"))
 HISTORY_LIMIT = int(os.environ.get("HISTORY_LIMIT", "20"))
