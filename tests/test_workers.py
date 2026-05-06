@@ -10,7 +10,6 @@ from typing import Any
 import pytest
 
 from bot.jobs import Job, JobQueue
-from bot.workers.analyzer import AnalyzerWorker
 from bot.workers.base import Worker
 from bot.workers.editor import EditorWorker
 from bot.workers.seo import SeoWorker
@@ -143,28 +142,53 @@ async def test_worker_chains_to_next_kind(queue: JobQueue) -> None:
     assert child.payload == {"echoed": {"x": 1}}
 
 
-async def test_full_pipeline_runs_through_stages(queue: JobQueue) -> None:
-    """Smoke test: starting at ``analyze`` we end with 3 publish jobs queued.
+async def test_full_pipeline_runs_through_stages(
+    queue: JobQueue, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Smoke test: ``edit → seo → publish`` chain across real workers.
 
-    We skip the ``download`` stage here because :class:`DownloaderWorker` now
-    really shells out to yt-dlp; coverage for it lives in
-    ``tests/test_downloader.py``. This test still covers the orchestration
-    contract: 1 analyze → 3 edit → 3 seo → 3 publish via parent_id chains.
+    Earlier stages (``download``, ``analyze``) shell out to yt-dlp, ffmpeg,
+    faster-whisper, and pyscenedetect, so they're covered by their own
+    test modules (``tests/test_downloader.py``, ``tests/test_analyzer.py``).
+    Here we exercise the editor→seo→publish portion using a fake source
+    file and a stubbed ffmpeg.
     """
+    import subprocess
+
+    from bot.workers import editor as editor_mod
+
+    src = tmp_path / "source.mp4"
+    src.write_bytes(b"\x00fake")
+
+    def fake_run(cmd: list[str], **kwargs: Any) -> subprocess.CompletedProcess[bytes]:
+        if cmd and cmd[-1].endswith(".mp4"):
+            Path(cmd[-1]).write_bytes(b"\x00mp4")
+        return subprocess.CompletedProcess(cmd, returncode=0, stdout=b"", stderr=b"")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    monkeypatch.setattr(editor_mod._config, "OVERLAY_LOGO_PATH", "")
+
     workers = [
-        AnalyzerWorker(queue, poll_interval_s=0.05),
         EditorWorker(queue, poll_interval_s=0.05),
         SeoWorker(queue, poll_interval_s=0.05),
     ]
     tasks = [asyncio.create_task(w.run()) for w in workers]
 
-    job_id = await queue.enqueue(
-        "analyze",
-        {"source_path": "/tmp/lilush/sources/fake.mp4", "duration_s": 5400},
-        chat_id=999,
-    )
+    edit_payload_template = {
+        "source_path": str(src),
+        "start_s": 0.0,
+        "end_s": 30.0,
+        "hook": "stub clip",
+    }
+    edit_ids = [
+        await queue.enqueue(
+            "edit",
+            {**edit_payload_template, "clip_index": idx},
+            chat_id=999,
+        )
+        for idx in range(3)
+    ]
 
-    # Wait for the chain: analyze → 3 edit → 3 seo → 3 publish (queued).
     deadline = asyncio.get_event_loop().time() + 30.0
     try:
         while asyncio.get_event_loop().time() < deadline:
@@ -182,13 +206,8 @@ async def test_full_pipeline_runs_through_stages(queue: JobQueue) -> None:
                 await t
 
     jobs = await queue.list_by_chat(999, limit=50)
-    by_kind = {
-        k: [j for j in jobs if j.kind == k]
-        for k in ("analyze", "edit", "seo", "publish")
-    }
+    by_kind = {k: [j for j in jobs if j.kind == k] for k in ("edit", "seo", "publish")}
 
-    assert len(by_kind["analyze"]) == 1
-    assert by_kind["analyze"][0].status == "done"
     assert len(by_kind["edit"]) == 3
     assert all(j.status == "done" for j in by_kind["edit"])
     assert len(by_kind["seo"]) == 3
@@ -198,6 +217,7 @@ async def test_full_pipeline_runs_through_stages(queue: JobQueue) -> None:
     # they may sit at "queued" state when no PublisherWorker runs.
     assert all(j.status in {"queued", "running"} for j in by_kind["publish"])
 
-    parent = await queue.get(job_id)
-    assert parent is not None
-    assert parent.status == "done"
+    for edit_id in edit_ids:
+        parent = await queue.get(edit_id)
+        assert parent is not None
+        assert parent.status == "done"
