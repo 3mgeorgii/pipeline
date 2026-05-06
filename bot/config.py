@@ -93,6 +93,15 @@ PROJECTS_DIR.mkdir(parents=True, exist_ok=True)
 JOBS_DB_PATH = DATA_DIR / "jobs.db"
 WORKER_POLL_INTERVAL_S = float(os.environ.get("WORKER_POLL_INTERVAL_S", "1.0"))
 
+# Downloader stage (yt-dlp).
+DOWNLOADS_DIR = DATA_DIR / "downloads"
+DOWNLOADS_DIR.mkdir(parents=True, exist_ok=True)
+DOWNLOAD_MAX_FILESIZE_MB = int(os.environ.get("DOWNLOAD_MAX_FILESIZE_MB", "5000"))
+DOWNLOAD_MAX_HEIGHT = int(os.environ.get("DOWNLOAD_MAX_HEIGHT", "1080"))
+# Optional: Netscape-format cookies file passed to yt-dlp for restricted
+# content (age-gate / region-locked). Empty == no cookies.
+YT_COOKIES_FILE = os.environ.get("YT_COOKIES_FILE", "").strip()
+
 EXEC_TIMEOUT = int(os.environ.get("EXEC_TIMEOUT", "30"))
 MAX_FILE_BYTES = int(os.environ.get("MAX_FILE_BYTES", "200000"))
 HISTORY_LIMIT = int(os.environ.get("HISTORY_LIMIT", "20"))
