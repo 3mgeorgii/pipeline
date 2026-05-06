@@ -46,36 +46,53 @@ router.message.middleware(_InboxLoggerMiddleware())
 
 
 HELP_TEXT = (
-    "<b>Lilush</b>\n"
+    "<b>Lilush</b> — Telegram-бот + видео-конвейер для шортсов\n"
     "Brain: <code>{brain}</code> | model: <code>{model}</code> {state}\n\n"
-    "<b>Pipeline</b>\n"
-    "/dl &lt;url&gt; — поставить ссылку в конвейер (download → analyze → edit → seo → publish)\n"
-    "/jobs — последние джобы и их статус\n\n"
+    "<b>📹 Видео-конвейер</b>\n"
+    "Кидаешь ссылку → скачиваю → транскрибирую → нарезаю на 3 шортса 1080×1920 → пишу SEO → собираю release-пакет.\n\n"
+    "  /dl &lt;url&gt; — поставить видео в конвейер\n"
+    "  /jobs — последние 20 джобов и их статус\n\n"
+    "Этапы (5 параллельных воркеров):\n"
+    "  1️⃣ <b>download</b> — yt-dlp, ≤1080p, ≤5 GB\n"
+    "  2️⃣ <b>analyze</b> — faster-whisper транскрипт + pyscenedetect сцены + LLM/heuristic ранкер клипов\n"
+    "  3️⃣ <b>edit</b> — ffmpeg vertical crop 1080×1920 + опциональный logo-overlay\n"
+    "  4️⃣ <b>seo</b> — pytrends Google Trends + LLM/template title/description/tags\n"
+    "  5️⃣ <b>publish</b> — DRY-RUN: clip.mp4 + youtube.json + tiktok.json + instagram.json в data/releases/&lt;id&gt;/\n\n"
+    "После /dl можешь сразу кидать следующую ссылку — все 5 воркеров крутятся параллельно (download #2 пока edit #1 пока seo #0).\n\n"
+    "<b>💬 LLM-чат</b>\n"
+    "Любое сообщение без <code>/</code> уходит в текущий brain. <code>auto</code> = бот сам отвечает через OpenRouter; <code>devin</code> = пишет в inbox.log и ждёт меня.\n\n"
     "<b>Старт / настройка</b>\n"
-    "/start — открыть онбординг (нажать кнопку чтобы стать владельцем)\n"
+    "/start — онбординг (первый /start = ты владелец)\n"
     "/setup — заново выбрать мозг и ввести ключи через кнопки\n\n"
-    "<b>Проекты</b>\n"
+    "<b>Проекты (для /exec /git)</b>\n"
     "/projects — список загруженных проектов\n"
     "/clone &lt;git-url&gt; [имя] — клонировать репо\n"
     "/project &lt;имя&gt; — переключиться на проект\n"
-    "/cd &lt;путь&gt; — сменить субпапку внутри проекта\n"
-    "/pwd — текущий путь\n\n"
+    "/cd &lt;путь&gt;, /pwd — навигация по субпапкам\n\n"
     "<b>Выполнение</b>\n"
     "/exec &lt;команда&gt; — bash в текущем проекте\n"
-    "/git &lt;аргументы&gt; — то же что /exec git ...\n\n"
-    "<b>Мозги</b>\n"
+    "/git &lt;args&gt; — то же что /exec git ...\n\n"
+    "<b>Мозги и ключи</b>\n"
     "/brain — кто сейчас в седле (auto / devin)\n"
-    "/setbrain auto|devin — переключить. devin = бот логирует в inbox.log и не отвечает автоматически\n"
-    "/keys — какие API-ключи установлены\n"
-    "/setkey &lt;provider&gt; &lt;key&gt; — задать ключ (openrouter, anthropic, openai)\n"
-    "/delkey &lt;provider&gt; — удалить ключ\n"
-    "/models — список моделей и текущая\n"
-    "/setmodel &lt;model&gt; — переключить модель\n\n"
+    "/setbrain auto|devin — переключить\n"
+    "/keys, /setkey &lt;provider&gt; &lt;key&gt;, /delkey &lt;provider&gt; — ключи (openrouter, anthropic, openai)\n"
+    "/models, /setmodel &lt;model&gt; — модель\n\n"
     "<b>Управление</b>\n"
     "/disable, /enable — выключить/включить бот\n"
     "/reset — сбросить контекст разговора\n"
-    "/help — это сообщение\n\n"
-    "Любое сообщение без / отправляется в текущий brain."
+    "/help — это сообщение"
+)
+
+
+# Краткая «визитка» для пустых/неизвестных запросов.
+WHOAMI_TEXT = (
+    "<b>Я Lilush</b> — превращаю длинные видео в шортсы для YouTube/TikTok/Instagram.\n\n"
+    "Что умею прямо сейчас:\n"
+    "• /dl &lt;ссылка-на-видео&gt; — запустить полный конвейер (5 этапов параллельно)\n"
+    "• /jobs — посмотреть статус всех твоих джобов\n"
+    "• общаться как ChatGPT — пиши любой текст без <code>/</code>\n"
+    "• /clone, /exec, /git — работать с git-репо прямо из чата\n\n"
+    "Полная справка: /help"
 )
 
 # Curated catalogue of models worth pinning. /setmodel accepts any string
@@ -611,3 +628,31 @@ async def handle_text(message: Message) -> None:
         await message.answer(f"Ошибка агента: {_html_escape(str(exc))}")
         return
     await _send_long(message, answer, code=False)
+
+
+# ---- unknown / empty fallback --------------------------------------------
+
+
+@router.message(F.text.startswith("/"))
+async def handle_unknown_command(message: Message) -> None:
+    """Catch-all for unknown commands — show capability summary instead of silence.
+
+    All Command(...) handlers above are matched first; this handler only
+    fires when nothing else claimed the message.
+    """
+    if not _is_authorized(message):
+        await _deny(message)
+        return
+    cmd = (message.text or "/").split()[0]
+    await message.answer(
+        f"Команда <code>{_html_escape(cmd)}</code> не известна.\n\n" + WHOAMI_TEXT
+    )
+
+
+@router.message()
+async def handle_anything_else(message: Message) -> None:
+    """Fallback for non-text messages (photos, stickers, voice, etc.)."""
+    if not _is_authorized(message):
+        await _deny(message)
+        return
+    await message.answer(WHOAMI_TEXT)
