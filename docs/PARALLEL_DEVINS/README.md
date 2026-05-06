@@ -52,22 +52,27 @@ Devin 1 and Devin 2 will:
 2. Each write a round-1 spec (no peeking at each other) (~45 min each).
 3. Cross-critique each other (~30 min).
 4. Revise (~45 min).
-5. Repeat critique / revise for up to 6 rounds total.
-6. Synthesize into `final_spec.md` and ping you in the final PR.
+5. Continue critique → revise rounds. Each round 3+ MUST introduce a new perspective (anti-collusion rule).
+6. If they appear to agree before round 3 → they automatically run 2 adversarial rounds (skeptical-engineer mode) before being allowed to converge.
+7. **Stop only when both post `APPROVED` comments** on the same spec PR.
+8. Hard safety cap of 15 rounds (failure mode — should not be reached).
 
-**Expected total wall time:** 4-8 hours depending on topic complexity. They run in parallel, so don't sit and watch — get notifications and check back.
+**Expected total wall time:** 4-8 hours for a focused topic; can run overnight for harder topics. They run in parallel, so don't sit and watch — get notifications and check back.
 
 You **do not** intervene unless one of them is clearly stuck or off-topic. They self-coordinate via PR comments.
 
-### Step 5 — Pick the better synthesis
+### Step 5 — Read the approved final spec
 
-Both Devin 1 and Devin 2 will open a `[FINAL]` PR with their synthesis version. They will (intentionally) differ. Read both and:
+When both Devins post `APPROVED` and open the `[FINAL]` PR, there is **one** `final_spec.md` at the root of the shared repo. Both agents signed off.
 
-- Pick whichever you prefer **as-is**, OR
-- Merge both into a hand-edited `final_spec.md` (merge the best parts), OR
-- If both are bad, send a critical comment on both PRs and make them do another round.
+Read it. If you're satisfied, merge the PR and proceed to step 6.
 
-**Tip:** if the topic was simple, the two specs will be ~80% the same. If the topic was hard, they'll differ a lot — that's where the value is.
+If you read it and disagree with something, you have two options:
+
+- **Light edit**: hand-modify the spec yourself before passing to Devin 3.
+- **Reopen debate**: comment on the `[FINAL]` PR with your concrete objection and tell both agents to do another adversarial round addressing it.
+
+If they hit the 15-round emergency stop without agreement, you'll see an `[EMERGENCY STOP]` PR listing 3-5 unresolved disagreements — you have to make the final calls and create the unified spec yourself, then proceed.
 
 ### Step 6 — Launch Devin 3 (implementer)
 
@@ -98,17 +103,21 @@ The main Devin will read the new tool's README, write a small adapter in the Lil
 ## Why this works
 
 - **No single LLM has all the answers.** Two heterogeneous models debating produces a better spec than either alone.
+- **Mutual agreement is the only stop condition.** No diff-based heuristics, no fixed round count. The debate ends when *both* agents post `APPROVED` on the same spec — forcing real consensus instead of LLM politeness.
+- **Anti-collusion rule.** From round 3 onwards, each agent must introduce a new perspective every round. Cuts off the failure mode where both LLMs converge on a popular-but-wrong answer.
+- **Dig-deeper rule.** If they agree before round 3, the protocol forces 2 adversarial rounds (skeptical-engineer mode) before convergence is allowed.
 - **Specs and implementation are separated.** The agents writing the spec can't take shortcuts in implementation. The implementer has a clear contract.
 - **Code review by a fresh sub-agent catches blind spots.** Implementing-Devin's own code review is biased; a fresh sub-agent with no shared context is more objective.
-- **You stay in control.** You choose which spec to merge, you approve the implementation breakdown, you sign off final integration.
+- **You stay in control.** You read the agreed spec, you approve the implementation breakdown, you sign off final integration.
 
 ## Practical tips
 
 - **Don't run more than 2 topics in parallel** until you've done one full pass. The workflow takes time to dial in.
 - **If a topic file is too narrow**, the debate will be short and shallow. Make topics meaty (multiple open questions, real production constraints).
 - **If a topic is too broad** (e.g. "redesign all of Lilush"), the agents will produce hand-wavy specs. Keep topics focused on one worker / one feature.
-- **Don't accept a spec that doesn't resolve every open question** in the topic file. Send it back for another round.
+- **Don't accept a spec that doesn't resolve every open question** in the topic file. Comment on the `[FINAL]` PR and tell both agents to do another adversarial round on the missing question.
 - **Don't accept Devin 3's PR until SCORE >= 9/10.** That's the whole point of the loop — don't let them shortcut it.
+- **Watch for the `NO NEW PERSPECTIVE` escape hatch.** If you see this phrase in a round 3+ commit, it's allowed but rare. If it appears 2+ times in a row, the agents are running out of ideas and you should consider the spec close to done.
 
 ## Limitations
 

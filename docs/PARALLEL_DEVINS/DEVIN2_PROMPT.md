@@ -81,21 +81,64 @@ You communicate ONLY through git: branches, commits, and PR comments. No externa
 
 ### Round 4+ — continue critique → revise
 
-Repeat rounds 2 and 3 (alternating critique and revision). **Stop conditions:**
+Keep alternating critique and revision rounds.
 
-- **Convergence:** your latest spec differs from your previous spec by < 5% (use `diff` line counts as a rough proxy). If both you and Devin 1 hit convergence in the same round → done.
-- **Hard cap:** **maximum 6 rounds total.** After round 6, force synthesis even if not converged.
-- **Mutual agreement:** if you and Devin 1 explicitly agree in a round's critique that the other's spec is acceptable as-is → done.
+### Anti-collusion rule (CRITICAL — applies from Round 3 onwards)
 
-### Final round — synthesis
+LLMs trained on overlapping data sets converge on superficially-agreed-upon answers that are wrong. To prevent this:
 
-1. On branch `devin2-final-synthesis`, write the **final consolidated spec** at `final_spec.md` (root of the repo).
-2. Mix the best of your latest spec and Devin 1's latest spec.
-3. Document any unresolved disagreements in a `## Disagreements & resolutions` section.
-4. Push and open the final PR titled `[FINAL] Synthesized TZ — ready for Devin 3`.
-5. Comment on the PR pinging the user (`@3mgeorgii`).
+- **In every round 3 and later, you MUST introduce at least 1 new perspective, new library, new GitHub repo, new benchmark, or new edge-case** that has NOT been mentioned in any previous round by either of you.
+- If you cannot find a new perspective, you must explicitly write `NO NEW PERSPECTIVE THIS ROUND — proceeding to validate existing consensus`. This is rare and you should default to digging harder before declaring it.
+- Cite the source of every new perspective (repo URL, paper, doc).
 
-The user picks whichever final PR they prefer (yours or Devin 1's), or merges both views.
+### Dig-deeper rule (if you and Devin 1 agree too early)
+
+If in **any of rounds 1, 2, or 3**, both you and Devin 1 appear to agree on the spec → this is a **red flag**. Premature agreement usually means both LLMs gave the obvious answer without thinking.
+
+When this happens you must:
+
+1. Open an `[Adversarial Round]` PR.
+2. Take the position of a **skeptical senior engineer** reviewing the spec.
+3. Find at least 3 concrete weaknesses in the supposedly-agreed spec (security, scalability, edge cases, license issues, vendor lock-in, etc).
+4. Push critique → wait for Devin 1 to respond → revise.
+5. Only after **at least 2 such adversarial rounds** are you allowed to proceed to mutual agreement.
+
+### Stop condition (the ONLY way to declare the debate done)
+
+**Explicit mutual agreement.** Both Devin 1 and Devin 2, in the same round, must each post a comment on the latest spec PR containing the literal phrase:
+
+> **APPROVED — I agree with this spec as-is, no further changes needed. (Devin 1)**
+
+and
+
+> **APPROVED — I agree with this spec as-is, no further changes needed. (Devin 2)**
+
+No other stop condition exists. Convergence-by-diff does not count. Round count does not count.
+
+### Safety net (only used in emergency)
+
+The absolute maximum is **15 rounds**. If after round 15 you and Devin 1 have NOT both posted APPROVED comments, both of you must:
+
+1. Stop debating.
+2. Each commit your latest spec to a `final-emergency/devin1-spec.md` (and `devin2-spec.md`).
+3. Open a single PR titled `[EMERGENCY STOP] No mutual agreement reached after 15 rounds`.
+4. List the 3-5 unresolved disagreements with each agent's position.
+5. Ping the user (`@3mgeorgii`) for human resolution.
+
+In the normal case, mutual agreement should be reached well before round 15. Reaching round 15 is a failure mode and should be treated as such.
+
+### Final commit — single shared `final_spec.md`
+
+When mutual agreement is reached:
+
+1. Whoever's spec was the latest one approved → checkout that branch as `final-spec`.
+2. Copy the agreed spec to `final_spec.md` at the repo root.
+3. Open a final PR titled `[FINAL] Approved TZ — ready for Devin 3`.
+4. **Both** Devin 1 and Devin 2 must comment on this PR with `APPROVED — final spec confirmed. (Devin N)`.
+5. The PR description must include a link back to the round in which mutual agreement was first reached.
+6. Ping the user (`@3mgeorgii`) with: "Готов финальный spec, оба агента согласны, передавай Devin 3."
+
+There is **only one** `final_spec.md`, not two. The output is a single document both of you signed off on.
 
 ## What `final_spec.md` must contain
 
@@ -124,8 +167,11 @@ The structure is dictated by the topic file's "Output expected" section. Read it
 - [ ] You cloned `<SHARED_REPO_URL>` and added `research/devin2-notes.md`
 - [ ] All your `transcript/round-N/devin2-*.md` files committed
 - [ ] At least 3 critique files committed
-- [ ] `final_spec.md` (your synthesis version) committed via PR
-- [ ] You pinged the user in the final PR
+- [ ] At least 2 `[Adversarial Round]` PRs exist (mandatory if early agreement; recommended otherwise)
+- [ ] Every round 3+ committed a documented new perspective (anti-collusion rule)
+- [ ] **Both** Devin 1 and Devin 2 have posted `APPROVED` comments on the latest spec PR
+- [ ] A single `final_spec.md` is at the repo root, signed off by both agents
+- [ ] You pinged the user in the `[FINAL]` PR
 
 Then stop. Do not implement. The user takes it from here.
 

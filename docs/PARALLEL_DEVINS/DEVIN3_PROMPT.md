@@ -11,7 +11,9 @@ You are **Devin 3**. Your job is to **implement** the technical specification pr
 Read this final spec in full:
 **<FINAL_SPEC_URL>**
 
-This document is the contract. Build exactly what it says. If the spec is ambiguous, prefer the option with the simplest implementation that still satisfies the spec's stated acceptance criteria.
+This document is the contract — it was produced by Devin 1 (Opus 4.7) and Devin 2 (GPT 5.5) debating until they both posted `APPROVED` comments. Build exactly what it says. If the spec is ambiguous, prefer the option with the simplest implementation that still satisfies the spec's stated acceptance criteria.
+
+If you find a **fundamental ambiguity or contradiction** that you cannot resolve safely on your own, do NOT guess. Open an issue in the debate repo (the same repo `<FINAL_SPEC_URL>` lives in) tagged `spec-gap` describing the issue. Then ping the user and wait for guidance — they may either tell you to make a call yourself, or re-trigger Devin 1 + Devin 2 for a one-round addendum debate.
 
 ## Lilush context (the spec describes a tool that may or may not integrate with Lilush — read so you understand the bigger picture)
 
