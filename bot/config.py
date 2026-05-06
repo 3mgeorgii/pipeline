@@ -102,6 +102,16 @@ DOWNLOAD_MAX_HEIGHT = int(os.environ.get("DOWNLOAD_MAX_HEIGHT", "1080"))
 # content (age-gate / region-locked). Empty == no cookies.
 YT_COOKIES_FILE = os.environ.get("YT_COOKIES_FILE", "").strip()
 
+# Analyzer stage (faster-whisper + pyscenedetect + LLM ranker).
+WHISPER_MODEL_SIZE = os.environ.get("WHISPER_MODEL_SIZE", "base")
+WHISPER_DEVICE = os.environ.get("WHISPER_DEVICE", "cpu")
+WHISPER_COMPUTE_TYPE = os.environ.get("WHISPER_COMPUTE_TYPE", "int8")
+ANALYZER_TARGET_CLIPS = int(os.environ.get("ANALYZER_TARGET_CLIPS", "3"))
+ANALYZER_CLIP_MIN_S = float(os.environ.get("ANALYZER_CLIP_MIN_S", "15"))
+ANALYZER_CLIP_MAX_S = float(os.environ.get("ANALYZER_CLIP_MAX_S", "60"))
+# Threshold (0-100) for pyscenedetect's ContentDetector.
+SCENEDETECT_THRESHOLD = float(os.environ.get("SCENEDETECT_THRESHOLD", "27"))
+
 EXEC_TIMEOUT = int(os.environ.get("EXEC_TIMEOUT", "30"))
 MAX_FILE_BYTES = int(os.environ.get("MAX_FILE_BYTES", "200000"))
 HISTORY_LIMIT = int(os.environ.get("HISTORY_LIMIT", "20"))
