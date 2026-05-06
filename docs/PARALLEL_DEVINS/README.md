@@ -44,22 +44,30 @@ Pick **one**. Don't run both topics through the same Devin 1 / Devin 2 — start
 5. Replace `<TOPIC_FILE_URL>` with the **same** topic URL you gave Devin 1.
 6. Paste into Devin 2's first message. Send.
 
-### Step 4 — Wait for the debate
+### Step 4 — Wait for the bottom-up debate
 
-Devin 1 and Devin 2 will:
+Devin 1 and Devin 2 follow a **3-tier agglomerative consensus** protocol — they build agreement from the bottom up:
 
-1. Each independently research the open internet (~30 min each).
-2. Each write a round-1 spec (no peeking at each other) (~45 min each).
-3. Cross-critique each other (~30 min).
-4. Revise (~45 min).
-5. Continue critique → revise rounds. Each round 3+ MUST introduce a new perspective (anti-collusion rule).
-6. If they appear to agree before round 3 → they automatically run 2 adversarial rounds (skeptical-engineer mode) before being allowed to converge.
-7. **Stop only when both post `APPROVED` comments** on the same spec PR.
-8. Hard safety cap of 15 rounds (failure mode — should not be reached).
+**Tier 0 — Atomic decisions (~50% of total time)**
+1. Each independently researches the open internet (~30 min each).
+2. Each writes ≥40 atomic decisions (e.g., "which lib?", "which threshold?", "which fallback?") with picks and reasoning. No peeking.
+3. They cross-critique EVERY atom — even ones where both picked the same. Each critique must propose an alternative the other missed (anti-collusion).
+4. They iterate per-atom until both write `APPROVED-ATOM <id> — pick: X, reasoning: Y` with matching pick AND matching reasoning.
+5. If an atom converges in round 1-2 → it goes through a mandatory adversarial round (skeptical senior engineer finds 3 weaknesses) before being allowed to lock.
 
-**Expected total wall time:** 4-8 hours for a focused topic; can run overnight for harder topics. They run in parallel, so don't sit and watch — get notifications and check back.
+**Tier 1 — Cluster design (~30% of total time)**
+6. Once ≥80% of atoms are locked, agents group them into 6-8 thematic clusters and write a coherent module design per cluster.
+7. Each cluster needs both `APPROVED-CLUSTER <name>` comments.
 
-You **do not** intervene unless one of them is clearly stuck or off-topic. They self-coordinate via PR comments.
+**Tier 2 — Final spec (~20% of total time)**
+8. Clusters are assembled into one `final_spec.md` at repo root.
+9. Both must comment `APPROVED — final spec confirmed.` on the `[FINAL]` PR.
+
+**Stop conditions:** All three tiers must reach explicit double-APPROVAL. No diff-based convergence. No coincidental same-pick auto-resolves. No fixed round count.
+
+**Hard safety cap:** 15 rounds total. Reaching it triggers `[EMERGENCY STOP]` (failure mode).
+
+**Expected total wall time:** 4-12 hours depending on topic complexity. Run overnight; check the repo in the morning. You can monitor progress without intervening — the count of locked atoms and approved clusters is a live progress bar.
 
 ### Step 5 — Read the approved final spec
 
@@ -102,11 +110,13 @@ The main Devin will read the new tool's README, write a small adapter in the Lil
 
 ## Why this works
 
-- **No single LLM has all the answers.** Two heterogeneous models debating produces a better spec than either alone.
-- **Mutual agreement is the only stop condition.** No diff-based heuristics, no fixed round count. The debate ends when *both* agents post `APPROVED` on the same spec — forcing real consensus instead of LLM politeness.
-- **Anti-collusion rule.** From round 3 onwards, each agent must introduce a new perspective every round. Cuts off the failure mode where both LLMs converge on a popular-but-wrong answer.
-- **Dig-deeper rule.** If they agree before round 3, the protocol forces 2 adversarial rounds (skeptical-engineer mode) before convergence is allowed.
-- **Specs and implementation are separated.** The agents writing the spec can't take shortcuts in implementation. The implementer has a clear contract.
+- **Bottom-up consensus.** The debate decomposes into ≥40 atomic decisions, each individually argued and locked. No top-down hand-waving, no shortcuts. The final spec emerges from agreed building blocks.
+- **No auto-resolve, ever.** Even if both agents independently picked the same option for an atom, they must still debate it (one must explicitly point out an alternative the other missed). Coincidental agreement is **forbidden** as a stop condition.
+- **Three-tier double-APPROVAL.** Every atom, every cluster, and the final spec each require explicit `APPROVED-ATOM` / `APPROVED-CLUSTER` / `APPROVED` comments from both agents with matching pick AND matching reasoning.
+- **Anti-collusion at every tier.** Atom critiques must list an alternative the other agent missed. Cluster designs must list ≥2 rejected alternatives. The final spec must list 3 rejected system-level designs.
+- **Dig-deeper rule.** If an atom converges in round 1 or 2, it is automatically re-opened with a skeptical-engineer adversarial round before being allowed to lock.
+- **Heterogeneous models.** Opus + GPT debating produces a better spec than either alone, because they have different blind spots.
+- **Specs and implementation are separated.** The spec-writing agents can't take shortcuts in implementation. The implementer has a clear contract.
 - **Code review by a fresh sub-agent catches blind spots.** Implementing-Devin's own code review is biased; a fresh sub-agent with no shared context is more objective.
 - **You stay in control.** You read the agreed spec, you approve the implementation breakdown, you sign off final integration.
 
@@ -117,7 +127,8 @@ The main Devin will read the new tool's README, write a small adapter in the Lil
 - **If a topic is too broad** (e.g. "redesign all of Lilush"), the agents will produce hand-wavy specs. Keep topics focused on one worker / one feature.
 - **Don't accept a spec that doesn't resolve every open question** in the topic file. Comment on the `[FINAL]` PR and tell both agents to do another adversarial round on the missing question.
 - **Don't accept Devin 3's PR until SCORE >= 9/10.** That's the whole point of the loop — don't let them shortcut it.
-- **Watch for the `NO NEW PERSPECTIVE` escape hatch.** If you see this phrase in a round 3+ commit, it's allowed but rare. If it appears 2+ times in a row, the agents are running out of ideas and you should consider the spec close to done.
+- **Watch for the `NO NEW PERSPECTIVE FOR atom-XXX` escape hatch.** If you see this phrase in a critique, it's allowed but rare. If it appears in >10% of atoms, the agents are running out of ideas and you should consider intervening with a comment forcing them to dig harder.
+- **Track progress via `decisions/locked-atoms.md`.** Count of locked atoms = your progress bar. If it stalls for >2 hours, agents are stuck on a contentious atom — leave a comment on the relevant atom-PR to break the deadlock.
 
 ## Limitations
 
