@@ -1,4 +1,5 @@
 import asyncio
+import contextlib
 import logging
 import random
 
@@ -7,8 +8,8 @@ from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.fsm.storage.memory import MemoryStorage
-from aiohttp import web
 from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
+from aiohttp import web
 
 from .config import (
     ALLOWED_USER_IDS,
@@ -22,10 +23,20 @@ from .config import (
     PORT,
     WEBHOOK_PATH,
     WEBHOOK_URL,
+    WORKER_POLL_INTERVAL_S,
 )
 from .handlers import router
+from .jobs import get_default_queue
 from .storage import storage
 from .wizard import wizard_router
+from .workers import (
+    AnalyzerWorker,
+    DownloaderWorker,
+    EditorWorker,
+    PublisherWorker,
+    SeoWorker,
+    Worker,
+)
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 logger = logging.getLogger(__name__)
@@ -112,6 +123,24 @@ async def _keep_alive_loop() -> None:
             await asyncio.sleep(_next_keepalive_delay())
 
 
+def _build_workers() -> list[Worker]:
+    """Instantiate one worker per pipeline stage, all bound to the default queue.
+
+    Concrete worker types are kept as a flat list so each gets exactly one
+    polling task. If we later want N concurrent editors (the CPU-heavy
+    stage), we just add ``EditorWorker(queue)`` multiple times.
+    """
+    queue = get_default_queue()
+    poll = WORKER_POLL_INTERVAL_S
+    return [
+        DownloaderWorker(queue, poll_interval_s=poll),
+        AnalyzerWorker(queue, poll_interval_s=poll),
+        EditorWorker(queue, poll_interval_s=poll),
+        SeoWorker(queue, poll_interval_s=poll),
+        PublisherWorker(queue, poll_interval_s=poll),
+    ]
+
+
 async def _run_polling() -> None:
     """Long-polling mode + a tiny aiohttp server for cloud health checks.
 
@@ -132,16 +161,22 @@ async def _run_polling() -> None:
     await site.start()
     logger.info("health server listening on 0.0.0.0:%s", PORT)
 
+    queue = get_default_queue()
+    await queue.init()
+    workers = _build_workers()
+    worker_tasks = [asyncio.create_task(w.run(), name=f"worker:{w.kind}") for w in workers]
+
     keepalive_task = asyncio.create_task(_keep_alive_loop())
-    logger.info("starting polling")
+    logger.info("starting polling with %d workers", len(workers))
     try:
         await dp.start_polling(bot)
     finally:
+        for w in workers:
+            w.stop()
         keepalive_task.cancel()
-        try:
-            await keepalive_task
-        except (asyncio.CancelledError, Exception):  # noqa: BLE001
-            pass
+        for task in (*worker_tasks, keepalive_task):
+            with contextlib.suppress(asyncio.CancelledError, Exception):
+                await task
         await runner.cleanup()
         await bot.session.close()
 
@@ -155,13 +190,26 @@ def _run_webhook() -> None:
 
     bot = _build_bot()
     dp = _build_dispatcher()
+    workers: list[Worker] = []
+    worker_tasks: list[asyncio.Task[None]] = []
 
     async def _on_startup(app: web.Application) -> None:
         logger.info("setting webhook to %s", WEBHOOK_URL)
         await bot.set_webhook(WEBHOOK_URL, drop_pending_updates=True)
+        queue = get_default_queue()
+        await queue.init()
+        workers.extend(_build_workers())
+        for w in workers:
+            worker_tasks.append(asyncio.create_task(w.run(), name=f"worker:{w.kind}"))
+        logger.info("started %d workers", len(workers))
 
     async def _on_cleanup(app: web.Application) -> None:
         logger.info("removing webhook")
+        for w in workers:
+            w.stop()
+        for task in worker_tasks:
+            with contextlib.suppress(asyncio.CancelledError, Exception):
+                await task
         try:
             await bot.delete_webhook()
         finally:

@@ -1,5 +1,7 @@
+import contextlib
 import logging
-from typing import Any, Awaitable, Callable
+from collections.abc import Awaitable, Callable
+from typing import Any
 
 from aiogram import BaseMiddleware, F, Router
 from aiogram.filters import Command, CommandObject
@@ -8,6 +10,7 @@ from aiogram.types import Message, TelegramObject
 from .agent import NoApiKeyError, run_agent
 from .config import ALLOWED_USER_IDS, DEFAULT_MODEL, PROJECTS_DIR
 from .inbox import log_inbox
+from .jobs import get_default_queue
 from .storage import KNOWN_PROVIDERS, storage
 from .tools import ToolError, clone_repo, exec_bash, project_root_for
 
@@ -43,8 +46,11 @@ router.message.middleware(_InboxLoggerMiddleware())
 
 
 HELP_TEXT = (
-    "<b>codespace bot</b>\n"
+    "<b>Lilush</b>\n"
     "Brain: <code>{brain}</code> | model: <code>{model}</code> {state}\n\n"
+    "<b>Pipeline</b>\n"
+    "/dl &lt;url&gt; — поставить ссылку в конвейер (download → analyze → edit → seo → publish)\n"
+    "/jobs — последние джобы и их статус\n\n"
     "<b>Старт / настройка</b>\n"
     "/start — открыть онбординг (нажать кнопку чтобы стать владельцем)\n"
     "/setup — заново выбрать мозг и ввести ключи через кнопки\n\n"
@@ -334,6 +340,60 @@ async def cmd_reset(message: Message) -> None:
     await message.answer("Контекст разговора очищен")
 
 
+# ---- /dl, /jobs (Lilush pipeline) ---------------------------------------
+
+
+def _looks_like_url(s: str) -> bool:
+    s = s.strip().lower()
+    return s.startswith(("http://", "https://"))
+
+
+@router.message(Command("dl"))
+async def cmd_dl(message: Message, command: CommandObject) -> None:
+    """Enqueue a download job for ``url`` and chain through the pipeline."""
+    if not _is_authorized(message):
+        await _deny(message)
+        return
+    url = (command.args or "").strip()
+    if not url or not _looks_like_url(url):
+        await message.answer(
+            "Использование: <code>/dl &lt;url&gt;</code>\n"
+            "Принимается любая ссылка, поддерживаемая yt-dlp "
+            "(YouTube, Vimeo, прямые .mp4, и т.д.)."
+        )
+        return
+    queue = get_default_queue()
+    job_id = await queue.enqueue("download", {"url": url}, chat_id=message.chat.id)
+    await message.answer(
+        f"Принято: job <code>#{job_id}</code>\n"
+        f"<i>скачивание → анализ → нарезка → SEO → публикация</i>\n"
+        f"Статус: <code>/jobs</code>"
+    )
+
+
+@router.message(Command("jobs"))
+async def cmd_jobs(message: Message) -> None:
+    """List the caller's recent jobs with status."""
+    if not _is_authorized(message):
+        await _deny(message)
+        return
+    queue = get_default_queue()
+    jobs = await queue.list_by_chat(message.chat.id, limit=20)
+    if not jobs:
+        await message.answer("Активных и завершённых джобов пока нет. Запусти <code>/dl &lt;url&gt;</code>.")
+        return
+    lines = ["<b>Последние джобы</b>"]
+    for job in jobs:
+        marker = {
+            "queued": "⏳",
+            "running": "▶️",
+            "done": "✓",
+            "failed": "✗",
+        }.get(job.status, "?")
+        lines.append(f"{marker} <code>#{job.id:>4}</code>  {job.kind:<9}  {job.status}")
+    await message.answer("\n".join(lines))
+
+
 # ---- /keys, /setkey, /delkey ---------------------------------------------
 
 
@@ -345,10 +405,11 @@ async def cmd_keys(message: Message) -> None:
     info = storage.list_provider_keys()
     lines = ["<b>API-ключи</b>"]
     for provider, data in info.items():
-        if data["source"] == "none":
-            badge = "не задан"
-        else:
-            badge = f"{data['masked']}  ({data['source']})"
+        badge = (
+            "не задан"
+            if data["source"] == "none"
+            else f"{data['masked']}  ({data['source']})"
+        )
         lines.append(f"  <code>{provider:10}</code> {badge}")
     lines.append("")
     lines.append("<i>source=telegram — поставлен через /setkey, source=env — из переменной окружения</i>")
@@ -369,11 +430,9 @@ async def cmd_setkey(message: Message, command: CommandObject) -> None:
         return
     provider, key = args[0].lower(), args[1].strip()
     # Try to delete the user's message right away — the key was sent in plaintext.
-    try:
+    # Older bots without delete permissions silently fall through.
+    with contextlib.suppress(Exception):
         await message.delete()
-    except Exception:
-        # Older bots without delete permissions; fall back to warning.
-        pass
     try:
         storage.set_provider_key(provider, key)
     except ValueError as exc:

@@ -1,0 +1,85 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "lilush"
+version = "0.1.0"
+description = "Self-hosted Telegram-bot with a multi-agent video pipeline (yt-dlp → cut → SEO → publish)."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "3mgeorgii" }]
+dependencies = [
+    "aiogram==3.13.1",
+    "aiohttp==3.10.10",
+    "aiosqlite>=0.20,<0.22",
+    "openai>=1.55.0,<3",
+    "httpx>=0.27,<0.29",
+    "python-dotenv==1.0.1",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.3",
+    "pytest-asyncio>=0.24",
+    "ruff>=0.7",
+    "mypy>=1.13",
+]
+
+[project.scripts]
+lilush = "bot.main:main"
+lilush-send = "bot.send:main"
+
+[tool.setuptools.packages.find]
+include = ["bot", "bot.*"]
+
+# ---- ruff ----------------------------------------------------------------
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+extend-exclude = [".devin", "data", "build", "dist"]
+
+[tool.ruff.lint]
+# Conservative starter set — we can tighten over time without churn.
+select = [
+    "E",   # pycodestyle errors
+    "F",   # pyflakes
+    "I",   # isort
+    "B",   # bugbear
+    "UP",  # pyupgrade
+    "SIM", # simplify
+]
+ignore = [
+    "E501", # line-length handled by formatter
+    "B008", # function-call-in-default-argument (Path() default in handlers)
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["B011"]  # allow `assert False` in tests
+
+# ---- mypy ----------------------------------------------------------------
+
+[tool.mypy]
+python_version = "3.11"
+strict_optional = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+ignore_missing_imports = true
+disallow_untyped_defs = false
+exclude = ["build/", "dist/", "data/", "\\.devin/"]
+
+# Pre-existing modules that haven't been typed yet. New code should be
+# strict; we'll lift these overrides one at a time as we refactor.
+# Tracked in .devin/tentacles/_global/todo.md.
+[[tool.mypy.overrides]]
+module = ["bot.agent", "bot.wizard", "bot.handlers", "bot.main"]
+ignore_errors = true
+
+# ---- pytest --------------------------------------------------------------
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+addopts = "-q"

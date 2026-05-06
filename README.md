@@ -1,7 +1,30 @@
-# codesp-bot-starter
+# Lilush
 
-Стартер для **самохостящегося Telegram-бота с AI-агентом**.
-Деплоится на любое облако (Render, Railway, Fly.io, Heroku, VPS) **с одним секретом — `BOT_TOKEN`**. Всё остальное (LLM-провайдер, API-ключ, модель) настраивается **изнутри Telegram через кнопки**.
+**Self-hosted Telegram-бот с мульти-агентным видео-конвейером.**
+Кидаешь ссылку → `yt-dlp` качает → анализатор находит лучшие моменты →
+редактор режет в вертикальные шорты → SEO-агент пишет метаданные →
+паблишер заливает на YT/TikTok/IG.
+
+Деплоится на любое облако (Render, Railway, Fly.io, Heroku, VPS) **с
+одним секретом — `BOT_TOKEN`**. Всё остальное (LLM-провайдер, API-ключ,
+модель) настраивается **изнутри Telegram через кнопки**.
+
+> ⚠️ Real-world hosting: тяжёлые стадии (ffmpeg / whisper) на free-tier
+> Render/Railway/Fly **не запустятся** — нужен 4 vCPU / 8 GB RAM минимум.
+> Подробности и реальные free-варианты в
+> [`.devin/tentacles/lilush-pipeline/CONTEXT.md`](.devin/tentacles/lilush-pipeline/CONTEXT.md).
+
+## 🛠 Архитектура (кратко)
+
+```
+Telegram /dl <url>  →  [download] → [analyze] → [edit] → [seo] → [publish]
+                                ⬑  SQLite jobs.db  ⬐
+```
+
+Каждая стадия — отдельный async-воркер, работают параллельно:
+пока `download` качает фильм #2, `editor` уже режет фильм #1, а `seo`
+пишет описания для уже нарезанных клипов. Подробности —
+[`.devin/tentacles/pipeline-skeleton/CONTEXT.md`](.devin/tentacles/pipeline-skeleton/CONTEXT.md).
 
 ## 🎯 3 шага до работающего бота
 
@@ -116,15 +139,29 @@ docker run -d --name codesp-bot --restart unless-stopped \
 ├── fly.toml               ← Fly.io app config
 └── bot/                   ← Python-пакет
     ├── __init__.py
-    ├── main.py            ← entrypoint (запускает polling + health-сервер)
+    ├── main.py            ← entrypoint (polling + health-сервер + воркеры)
     ├── config.py          ← env-vars
-    ├── handlers.py        ← /help, /clone, /exec, /git и тексты
+    ├── handlers.py        ← /help, /clone, /exec, /git, /dl, /jobs
     ├── wizard.py          ← /start, /setup, FSM, кнопки выбора мозга
     ├── storage.py         ← persistent state в data/state.json
     ├── agent.py           ← LLM-агент (OpenRouter / OpenAI-compatible)
     ├── tools.py           ← list_dir / read_file / write_file / exec_bash
     ├── inbox.py           ← лог входящих для devin-brain режима
+    ├── jobs.py            ← SQLite-очередь для pipeline-джобов
+    ├── workers/           ← воркеры pipeline-стадий (download/analyze/edit/seo/publish)
     └── send.py            ← CLI: python -m bot.send <chat_id> "msg"
+```
+
+## 🧪 Разработка
+
+```bash
+python3 -m venv .venv && source .venv/bin/activate
+pip install -e ".[dev]"
+
+# линт + типы + тесты — то же что в CI
+ruff check bot/ tests/
+mypy bot/ tests/
+BOT_TOKEN=dummy:dummy pytest tests/ -v
 ```
 
 ---

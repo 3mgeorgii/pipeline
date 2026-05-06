@@ -56,10 +56,7 @@ def main(argv: list[str] | None = None) -> None:
     )
     args = parser.parse_args(argv)
 
-    if not args.text or args.text == ["-"]:
-        text = sys.stdin.read()
-    else:
-        text = " ".join(args.text)
+    text = sys.stdin.read() if not args.text or args.text == ["-"] else " ".join(args.text)
     asyncio.run(_send(args.chat_id, text, args.html))
 
 
