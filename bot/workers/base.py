@@ -93,7 +93,20 @@ class Worker:
                 if job is None:
                     await self._sleep_or_stop()
                     continue
-                await self._handle(job)
+                try:
+                    await self._handle(job)
+                except Exception as exc:  # noqa: BLE001 — never let the loop die
+                    # _handle already protects ``process``; this catches
+                    # failures from mark_done / mark_failed / enqueue_next
+                    # (e.g. SQLite BUSY, full disk) so a transient DB
+                    # error doesn't kill the worker permanently.
+                    logger.exception(
+                        "worker[%s] _handle crashed on job=%s: %s",
+                        self.kind,
+                        job.id,
+                        exc,
+                    )
+                    await self._sleep_or_stop()
         finally:
             logger.info("worker[%s] stopped", self.kind)
 

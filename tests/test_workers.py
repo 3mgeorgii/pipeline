@@ -89,6 +89,37 @@ async def test_worker_marks_failed_on_exception(queue: JobQueue) -> None:
     assert job.retries == 1
 
 
+async def test_worker_survives_db_error_in_handle(queue: JobQueue) -> None:
+    """The polling loop must not die when ``mark_done`` raises (e.g. SQLite BUSY)."""
+
+    original_mark_done = queue.mark_done
+    failures = {"left": 1}
+
+    async def flaky_mark_done(job_id: int, result: dict[str, Any]) -> None:
+        if failures["left"] > 0:
+            failures["left"] -= 1
+            raise RuntimeError("simulated SQLite BUSY")
+        await original_mark_done(job_id, result)
+
+    queue.mark_done = flaky_mark_done  # type: ignore[method-assign]
+
+    worker = _RecordingWorker(queue, poll_interval_s=0.05)
+    first = await queue.enqueue("test_kind", {"v": 1}, chat_id=1)
+    second = await queue.enqueue("test_kind", {"v": 2}, chat_id=1)
+    await _drain(worker, timeout=3.0)
+
+    # The first job's mark_done blew up; the worker must not have crashed,
+    # so the second job still got processed.
+    assert second in worker.processed
+    job2 = await queue.get(second)
+    assert job2 is not None
+    assert job2.status == "done"
+    # First job's status row stays at ``running`` because mark_done failed.
+    job1 = await queue.get(first)
+    assert job1 is not None
+    assert job1.status == "running"
+
+
 async def test_worker_chains_to_next_kind(queue: JobQueue) -> None:
     class _Producer(Worker):
         kind = "test_kind"
