@@ -4,20 +4,34 @@
 Поставлены [P0]/[P1]/[P2] по моей субъективной оценке отдачи. Финальный
 порядок — за пользователем.
 
+## ⚠️ Scope pivot (2026-05)
+
+Проект переименован в **Lilush** и пивотнут с «улучшения generic-бота» на
+**мульти-агентный видео-конвейер** (см.
+[`.devin/tentacles/lilush-pipeline/CONTEXT.md`](../lilush-pipeline/CONTEXT.md)).
+Большая часть бэклога ниже остаётся актуальной как код-качество, но
+приоритет сместился на pipeline-tentacles (см. также
+[`.devin/tentacles/pipeline-skeleton/`](../pipeline-skeleton/)).
+
 ## P0 — фундамент (без этого больно делать остальное)
 
-- [ ] **tests-foundation** — добавить `pytest` + `pytest-asyncio`,
-      первые smoke-тесты на `tools.py` (path-escape, write/read,
-      exec_bash timeout) и `storage.py` (owner-claim, set/get_provider_key,
-      history rolling). Каркас под фикстуры с tmp DATA_DIR.
-- [ ] **lint-typecheck** — `ruff` + `mypy` (или `pyright`), конфиг в
-      `pyproject.toml`, прогон по чистому репо, фикс импорт-сортировки и
-      явных мисматчей типов.
-- [ ] **ci-github-actions** — workflow `.github/workflows/ci.yml`:
-      install → ruff → mypy → pytest на 3.11/3.12. Кэш pip.
-- [ ] **pyproject-toml** — переезд на `pyproject.toml`
-      (deps + tool config), `requirements.txt` оставить как
+- [x] **tests-foundation** — `pytest` + `pytest-asyncio`, тесты очереди и
+      воркеров (14 штук). Закрыто PR-ом pipeline-skeleton.
+- [x] **lint-typecheck** — `ruff` + `mypy` сконфигурированы в
+      `pyproject.toml`, codebase ruff-clean. Mypy строгий для нового кода;
+      pre-existing модули (`bot.agent`, `bot.wizard`, `bot.handlers`,
+      `bot.main`) под per-module override до отдельного «mypy-strictness»
+      tentacle.
+- [x] **ci-github-actions** — `.github/workflows/ci.yml` с ruff + mypy +
+      pytest на push/PR.
+- [x] **pyproject-toml** — переезд на `pyproject.toml`
+      (deps + tool config), `requirements.txt` оставлен как
       lock для совместимости с Render/Railway/Fly.
+
+- [ ] **mypy-strictness** — снять per-module overrides по одному:
+      `bot.agent` (openai SDK типы), `bot.wizard` (InaccessibleMessage
+      union-attr), `bot.handlers` (User|None разворачивать перед `.id`),
+      `bot.main` (aiohttp app.on_startup приведение типа).
 
 ## P1 — безопасность и устойчивость
 
