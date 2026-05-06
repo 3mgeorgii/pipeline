@@ -162,6 +162,58 @@ async def test_uses_llm_ranker_when_key_present(
     assert auth == "Bearer sk-test"
 
 
+async def test_llm_empty_choices_falls_back_to_heuristic(
+    fake_source: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Empty ``choices`` array (rate-limit / content filter) → heuristic
+    fallback, not an unhandled IndexError."""
+    monkeypatch.setattr(analyzer_mod._config, "OPENROUTER_API_KEY", "sk-test")
+
+    class _EmptyChoicesResp:
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> dict[str, Any]:
+            return {"choices": []}
+
+    import httpx
+
+    monkeypatch.setattr(httpx, "post", lambda url, **kwargs: _EmptyChoicesResp())
+
+    worker = AnalyzerWorker(MagicMock())
+    result = await worker.process(
+        _make_job({"source_path": str(fake_source), "duration_s": 150.0})
+    )
+    assert result["analysis_method"] == "heuristic"
+    assert len(result["clips"]) > 0
+
+
+async def test_llm_null_content_falls_back_to_heuristic(
+    fake_source: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``content`` = None (some models do this) → heuristic fallback,
+    not an unhandled TypeError from json.loads(None)."""
+    monkeypatch.setattr(analyzer_mod._config, "OPENROUTER_API_KEY", "sk-test")
+
+    class _NullContentResp:
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> dict[str, Any]:
+            return {"choices": [{"message": {"content": None}}]}
+
+    import httpx
+
+    monkeypatch.setattr(httpx, "post", lambda url, **kwargs: _NullContentResp())
+
+    worker = AnalyzerWorker(MagicMock())
+    result = await worker.process(
+        _make_job({"source_path": str(fake_source), "duration_s": 150.0})
+    )
+    assert result["analysis_method"] == "heuristic"
+    assert len(result["clips"]) > 0
+
+
 async def test_clip_windows_are_within_bounds(
     fake_source: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -450,7 +450,7 @@ def _rank_with_llm(
     try:
         content = body["choices"][0]["message"]["content"]
         parsed = json.loads(content)
-    except (KeyError, ValueError, json.JSONDecodeError) as exc:
+    except (KeyError, IndexError, TypeError, ValueError, json.JSONDecodeError) as exc:
         raise RuntimeError(f"LLM ranker returned unparseable response: {exc}") from exc
 
     picks_raw = parsed.get("picks") or parsed.get("clips") or parsed
