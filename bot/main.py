@@ -13,6 +13,7 @@ from aiohttp import web
 
 from .config import (
     ALLOWED_USER_IDS,
+    BOT_PERSONA,
     BOT_TOKEN,
     KEEP_ALIVE_BIAS,
     KEEP_ALIVE_INTERVAL,
@@ -27,6 +28,7 @@ from .config import (
 )
 from .handlers import router
 from .jobs import get_default_queue
+from .persona import get_persona, known_keys
 from .storage import storage
 from .wizard import wizard_router
 from .workers import (
@@ -226,7 +228,62 @@ def _run_webhook() -> None:
     web.run_app(app, host="0.0.0.0", port=PORT)
 
 
+async def _run_dormant() -> None:
+    """Health-only server for services whose BOT_TOKEN hasn't been set yet.
+
+    Render Free requires the process to bind a port (health check) within
+    a few minutes or marks the deploy failed. So even without a token we
+    spin up an aiohttp server on ``/`` and ``/healthz``, log a warning,
+    and idle forever. The user just edits ``BOT_TOKEN`` in the Render env
+    vars and the service auto-restarts into normal polling mode.
+
+    Self-ping intentionally stays disabled in dormant mode — there's no
+    bot to keep alive, the service may safely sleep.
+    """
+    logger.warning(
+        "BOT_TOKEN is empty — entering DORMANT mode. Health server only, "
+        "no Telegram polling. Set BOT_TOKEN in Render env vars to "
+        "activate this bot."
+    )
+    health_app = web.Application()
+    health_app.router.add_get("/", _health)
+    health_app.router.add_get("/healthz", _health)
+    runner = web.AppRunner(health_app)
+    await runner.setup()
+    site = web.TCPSite(runner, host="0.0.0.0", port=PORT)
+    await site.start()
+    logger.info("dormant health server listening on 0.0.0.0:%s", PORT)
+    try:
+        # Block forever. The process exits on signal (Render redeploy).
+        await asyncio.Event().wait()
+    finally:
+        await runner.cleanup()
+
+
 def main() -> None:
+    persona = get_persona()
+    if BOT_PERSONA not in known_keys():
+        logger.warning(
+            "BOT_PERSONA=%r is not in the known roster %s — falling back to 'boss'. "
+            "Set BOT_PERSONA correctly in Render env vars for this service.",
+            BOT_PERSONA,
+            known_keys(),
+        )
+    logger.info(
+        "boot: persona=%s (%s, %s/%s)",
+        persona.key,
+        persona.display_name,
+        persona.department,
+        persona.rank,
+    )
+
+    if not BOT_TOKEN:
+        # Service deployed without a token yet — run a stub health server
+        # so Render keeps the deploy alive, and let the user add a token
+        # in the dashboard later.
+        asyncio.run(_run_dormant())
+        return
+
     owner = storage.get_owner_id()
     if owner is None and not ALLOWED_USER_IDS:
         logger.info(

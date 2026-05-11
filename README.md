@@ -14,6 +14,97 @@
 > Подробности и реальные free-варианты в
 > [`.devin/tentacles/lilush-pipeline/CONTEXT.md`](.devin/tentacles/lilush-pipeline/CONTEXT.md).
 
+## 🚜 Farm: 20 ботов одним Blueprint
+
+Помимо одиночного деплоя (см. ниже) репо разворачивается как
+**ферма из 20 Render-сервисов** — Boss + 4 Department Lead'а
+(Research / Debate / Coder / DevOps) + 15 worker'ов. Каждый сервис —
+это та же кодовая база, активированная разной `BOT_PERSONA`.
+
+```
+Leadership (5):
+  [lilush-boss]                /start /research /debate /implement /status
+  [lilush-research-lead]       координирует research-отдел
+  [lilush-debate-lead]         координирует debate-отдел
+  [lilush-coder-lead]          координирует coder-отдел
+  [lilush-devops-lead]         координирует DevOps-отдел
+
+Research (4):  github-scout, reddit-scout, hn-scout, apify-runner
+Debate (4):    d1-skeptic, d2-optimist, judge, tz-writer
+Coder (3):     devin-spawner, pr-reviewer, tester
+DevOps (4):    watchdog, render-admin, github-admin, archivist
+```
+
+**Деплой:**
+
+1. Создай ботов в [@BotFather](https://t.me/BotFather) — можешь делать
+   постепенно. Один уже есть — `@openaiopus_bot` для Boss. Для каждого
+   нового бота: `/newbot` → имя → username → токен → Group Privacy: Off.
+2. <https://dashboard.render.com> → **New +** → **Blueprint** → подключи
+   этот репо (или дай Public Git URL без OAuth).
+3. Render прочитает `render.yaml`, найдёт **20 сервисов** и для каждого
+   спросит `BOT_TOKEN` + `ALLOWED_USER_IDS`. Для ботов которых ещё нет
+   в BotFather — **оставь поле пустым**. Эти сервисы поднимутся в
+   **dormant-режиме** (только `/healthz`, не падают, ничего не тратят).
+4. **Apply Blueprint** — Render развернёт 20 сервисов параллельно.
+5. Активные боты в Telegram: `/start` → **🚀 Запустить и стать
+   владельцем** → выбери мозг → введи API-ключ. Полностью в TG.
+6. Dormant-сервисы активируются позже: Render dashboard → нужный
+   сервис → **Environment** → впиши `BOT_TOKEN` → Save → бот
+   автоматом перезапустится в обычном режиме.
+
+Каждый бот получает свой 1GB persistent disk на `/data` и
+само-пингует свой `/healthz` каждые 4-7 минут (только активные —
+dormant сервис не пингает себя, просто спит).
+
+**Кастомизировать список ролей:** редактируй `bot/persona.py` и
+регенерируй `render.yaml`:
+
+```bash
+python scripts/gen_render_yaml.py            # все 20 service'ов (default)
+python scripts/gen_render_yaml.py --first 5  # только boss + 4 lead'а
+```
+
+### 🔑 Внешние API для research-ботов
+
+Researcher-боты (`github_scout`, `reddit_scout`, `apify_runner`, ...)
+ходят за данными в платные/полу-платные сервисы. Чтобы не сетапить
+их через env vars в Render — добавь ключи прямо из Telegram:
+
+`/setup` → **🛠 Внешние API** → выбери инструмент → пришли ключ
+одним сообщением (бот удалит твоё сообщение после сохранения).
+
+Что поддерживается из коробки:
+
+| Инструмент | Зачем | Где взять |
+|---|---|---|
+| **Apify** | Готовые scrap-actors (Reddit, TikTok, YT, Twitter) | <https://console.apify.com/account/integrations> |
+| **Firecrawl** | Сайт → чистый markdown для LLM | <https://firecrawl.dev/app/api-keys> |
+| **Tavily** | Search-API для AI-агентов | <https://app.tavily.com/home> |
+| **Brave Search** | Альтернатива Google без трекинга | <https://api-dashboard.search.brave.com/app/keys> |
+| **Exa** | Семантический поиск | <https://dashboard.exa.ai/api-keys> |
+| **GitHub PAT** | Поднимает GitHub API rate-limit 60 → 5000/час | <https://github.com/settings/tokens> |
+
+Из кода бота: `storage.get_external_tool_key("apify")` (fallback на
+env var `APIFY_API_TOKEN`).
+
+### 🦊 vercel-labs/agent-browser
+
+`Dockerfile` уже ставит [vercel-labs/agent-browser](https://github.com/vercel-labs/agent-browser)
+глобально (Rust CLI, ~3 МБ). Researcher-боты могут вызывать его через
+shell-tool который у Lilush уже есть:
+
+```python
+# в коде research-бота
+await shell("agent-browser open https://reddit.com/r/ffmpeg")
+await shell("agent-browser snapshot")   # accessibility tree
+await shell("agent-browser get text @e1")
+```
+
+Chrome для headless-режима **не вкомпилирован** в образ — `agent-browser`
+скачивает его лениво в `/data/.cache` на первом запуске (~200 МБ),
+дальше переиспользует благодаря persistent disk.
+
 ## 🛠 Архитектура (кратко)
 
 ```

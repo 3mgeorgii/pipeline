@@ -8,10 +8,27 @@ ENV PYTHONUNBUFFERED=1 \
 
 WORKDIR /app
 
-# system deps for git/clone helper inside the bot
+# Base system deps. Includes Node.js (for vercel-labs/agent-browser CLI
+# that research bots invoke via shell) and Chrome runtime libs so the
+# bundled Chrome from agent-browser can launch headless.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends git ca-certificates curl \
+    && apt-get install -y --no-install-recommends \
+        git ca-certificates curl gnupg \
+        # Chrome runtime dependencies (libs needed by headless Chrome) —
+        # let agent-browser install Chrome itself, we only ship the libs.
+        libnss3 libatk1.0-0 libatk-bridge2.0-0 libcups2 libxkbcommon0 \
+        libxcomposite1 libxdamage1 libxfixes3 libxrandr2 libgbm1 \
+        libpango-1.0-0 libcairo2 libasound2 libdrm2 fonts-liberation \
+    && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
+    && apt-get install -y --no-install-recommends nodejs \
     && rm -rf /var/lib/apt/lists/*
+
+# Install agent-browser CLI globally. We DO NOT run `agent-browser
+# install` here (it downloads ~200MB of Chrome). Researcher bots that
+# actually need a browser will run it lazily on first use, storing
+# Chrome under /data so it persists across redeploys without bloating
+# the image.
+RUN npm install -g agent-browser@latest
 
 # python deps
 COPY requirements.txt /app/requirements.txt
@@ -20,7 +37,7 @@ RUN pip install --no-cache-dir -r /app/requirements.txt
 # app code
 COPY bot/ /app/bot/
 
-# data dir for persisted state.json
+# data dir for persisted state.json + Chrome cache from agent-browser
 RUN mkdir -p /data
 
 EXPOSE 8080

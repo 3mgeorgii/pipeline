@@ -15,7 +15,16 @@ def _split_ids(raw: str) -> set[int]:
     return out
 
 
-BOT_TOKEN = os.environ["BOT_TOKEN"]
+# Which farm role this process represents — see bot/persona.py. Defaults
+# to "boss" so a single-bot deploy (the original @openaiopus_bot setup)
+# keeps working unchanged.
+BOT_PERSONA = os.environ.get("BOT_PERSONA", "boss").strip().lower()
+
+# BOT_TOKEN is OPTIONAL in farm mode — a service can be deployed BEFORE
+# the user has created its BotFather bot. Empty token → dormant mode in
+# bot.main (only /healthz, no polling). Set the var in Render dashboard
+# later to activate.
+BOT_TOKEN = os.environ.get("BOT_TOKEN", "").strip()
 OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY", "")
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
@@ -27,8 +36,10 @@ ALLOWED_USER_IDS = _split_ids(os.environ.get("ALLOWED_USER_IDS", ""))
 MODE = os.environ.get("BOT_MODE", "polling")
 PORT = int(os.environ.get("PORT", "8080"))
 PUBLIC_URL = os.environ.get("PUBLIC_URL", "").rstrip("/")
-WEBHOOK_PATH = f"/tg/{BOT_TOKEN.split(':', 1)[0]}"
-WEBHOOK_URL = f"{PUBLIC_URL}{WEBHOOK_PATH}" if PUBLIC_URL else ""
+# WEBHOOK_PATH uses bot id prefix; if BOT_TOKEN is empty we still expose
+# a deterministic /tg path so the dormant health server has a stable URL.
+WEBHOOK_PATH = f"/tg/{BOT_TOKEN.split(':', 1)[0] if BOT_TOKEN else 'dormant'}"
+WEBHOOK_URL = f"{PUBLIC_URL}{WEBHOOK_PATH}" if PUBLIC_URL and BOT_TOKEN else ""
 
 
 def _resolve_keepalive_url() -> str:
