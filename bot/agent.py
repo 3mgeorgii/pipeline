@@ -7,6 +7,7 @@ from openai._exceptions import APIError
 
 from .config import (
     AGENT_MAX_STEPS,
+    AGENT_MAX_TOKENS,
     APP_TITLE,
     DEFAULT_MODEL,
     FALLBACK_MODELS,
@@ -36,7 +37,7 @@ Rules:
 - Be concise: in chat replies aim for short paragraphs. Long file content goes via tools, not into the reply.
 - After making changes, suggest a git commit message; do not commit unless the user confirms or explicitly asks.
 - If the user asks for git operations, use exec_bash with git commands.
-- If no project is selected, tell the user to run /clone <url> or /project <name> first.
+- A working project (CWD) is optional. If the user asks about files / code / shell and no project is set, gently mention they can run /clone <url> or /project <name>. For ordinary chat, just respond — do not block on a missing project.
 """
 
 
@@ -112,6 +113,7 @@ async def _call_model(
                 tools=TOOL_DEFINITIONS,
                 tool_choice="auto",
                 temperature=0.2,
+                max_tokens=AGENT_MAX_TOKENS,
             )
             usage = getattr(resp, "usage", None)
             if usage is not None:

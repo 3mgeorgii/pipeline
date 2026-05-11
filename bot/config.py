@@ -154,6 +154,12 @@ EXEC_TIMEOUT = int(os.environ.get("EXEC_TIMEOUT", "30"))
 MAX_FILE_BYTES = int(os.environ.get("MAX_FILE_BYTES", "200000"))
 HISTORY_LIMIT = int(os.environ.get("HISTORY_LIMIT", "20"))
 AGENT_MAX_STEPS = int(os.environ.get("AGENT_MAX_STEPS", "8"))
+# Cap on completion tokens per LLM call. OpenRouter free-tier accounts
+# can usually afford only a few thousand tokens per request, and the
+# default (model max, e.g. 65 536 for Opus) triggers a 402 "needs more
+# credits" error. 4 096 is plenty for chat replies; raise via env if you
+# pay for a bigger budget.
+AGENT_MAX_TOKENS = int(os.environ.get("AGENT_MAX_TOKENS", "4096"))
 
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 HTTP_REFERER = os.environ.get("HTTP_REFERER", "https://github.com/")
