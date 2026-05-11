@@ -39,6 +39,7 @@ from aiogram.types import (
     Message,
 )
 
+from .persona import get_persona
 from .storage import storage
 
 logger = logging.getLogger(__name__)
@@ -122,12 +123,15 @@ async def cmd_start_wizard(message: Message, state: FSMContext) -> None:
         return
     await state.clear()
 
+    persona = get_persona()
     owner = storage.get_owner_id()
     if owner is None:
         await message.answer(
-            "<b>Привет!</b>\n"
-            "Ты только что развернул свой контейнер. Я не знаю кому теперь подчиняться — "
-            "первый человек, кто нажмёт кнопку ниже, станет владельцем (только он сможет писать боту дальше).\n\n"
+            f"<b>Привет! Я {persona.display_name}.</b>\n"
+            f"<i>{persona.title}</i>\n\n"
+            f"{persona.description}\n\n"
+            "Ты только что развернул мой контейнер. Я не знаю кому теперь подчиняться — "
+            "первый человек, кто нажмёт кнопку ниже, станет владельцем (только он сможет писать мне дальше).\n\n"
             f"Твой Telegram id: <code>{user.id}</code>",
             reply_markup=_kb_claim(),
         )
@@ -135,14 +139,14 @@ async def cmd_start_wizard(message: Message, state: FSMContext) -> None:
 
     if owner != user.id:
         await message.answer(
-            "Этот бот уже привязан к другому владельцу. Если это твой контейнер и ты потерял доступ — "
+            f"Я {persona.display_name}, и я уже привязан к другому владельцу. Если это твой контейнер и ты потерял доступ — "
             "удали в <code>data/state.json</code> поле <code>_settings.owner_id</code> и перезапусти бот.\n\n"
             f"Твой Telegram id: <code>{user.id}</code>"
         )
         return
 
     await message.answer(
-        "Ты владелец. Что хочешь делать?\n"
+        f"<b>{persona.display_name}</b> на связи. Ты владелец. Что хочешь?\n"
         "• Перенастроить мозг — кнопки ниже\n"
         "• Посмотреть команды — /help",
         reply_markup=_kb_brain(),

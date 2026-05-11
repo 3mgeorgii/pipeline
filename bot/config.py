@@ -15,6 +15,11 @@ def _split_ids(raw: str) -> set[int]:
     return out
 
 
+# Which farm role this process represents — see bot/persona.py. Defaults
+# to "boss" so a single-bot deploy (the original @openaiopus_bot setup)
+# keeps working unchanged.
+BOT_PERSONA = os.environ.get("BOT_PERSONA", "boss").strip().lower()
+
 BOT_TOKEN = os.environ["BOT_TOKEN"]
 OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY", "")
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")

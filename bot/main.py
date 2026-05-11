@@ -13,6 +13,7 @@ from aiohttp import web
 
 from .config import (
     ALLOWED_USER_IDS,
+    BOT_PERSONA,
     BOT_TOKEN,
     KEEP_ALIVE_BIAS,
     KEEP_ALIVE_INTERVAL,
@@ -27,6 +28,7 @@ from .config import (
 )
 from .handlers import router
 from .jobs import get_default_queue
+from .persona import get_persona, known_keys
 from .storage import storage
 from .wizard import wizard_router
 from .workers import (
@@ -227,6 +229,22 @@ def _run_webhook() -> None:
 
 
 def main() -> None:
+    persona = get_persona()
+    if BOT_PERSONA not in known_keys():
+        logger.warning(
+            "BOT_PERSONA=%r is not in the known roster %s — falling back to 'boss'. "
+            "Set BOT_PERSONA correctly in Render env vars for this service.",
+            BOT_PERSONA,
+            known_keys(),
+        )
+    logger.info(
+        "boot: persona=%s (%s, %s/%s)",
+        persona.key,
+        persona.display_name,
+        persona.department,
+        persona.rank,
+    )
+
     owner = storage.get_owner_id()
     if owner is None and not ALLOWED_USER_IDS:
         logger.info(
