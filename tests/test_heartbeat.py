@@ -80,15 +80,17 @@ def test_ping_calls_openrouter_and_logs_tokens(fresh_storage) -> None:
 
 
 def test_ping_swallows_api_error(fresh_storage) -> None:
-    """An OpenRouter outage must NOT crash the bot — return False, log nothing."""
+    """An OpenRouter outage must NOT crash the bot — return False, log nothing.
+
+    We use a generic ``Exception`` rather than ``openai.APIError`` because
+    constructing the latter requires a real ``httpx.Request``; the heartbeat's
+    catch-all ``except Exception`` clause covers both code paths.
+    """
     storage, heartbeat = fresh_storage
     storage.set_provider_key("openrouter", "sk-or-test")
-    from openai._exceptions import APIError
 
     mock_client = AsyncMock()
-    mock_client.chat.completions.create = AsyncMock(
-        side_effect=APIError(message="boom", request=None, body=None)
-    )
+    mock_client.chat.completions.create = AsyncMock(side_effect=RuntimeError("boom"))
     with patch("bot.heartbeat.AsyncOpenAI", return_value=mock_client):
         ok = asyncio.run(heartbeat._ping_once())
     assert ok is False
