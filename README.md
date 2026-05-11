@@ -14,45 +14,55 @@
 > Подробности и реальные free-варианты в
 > [`.devin/tentacles/lilush-pipeline/CONTEXT.md`](.devin/tentacles/lilush-pipeline/CONTEXT.md).
 
-## 🚜 Farm: 5 ботов одним Blueprint
+## 🚜 Farm: 20 ботов одним Blueprint
 
-Помимо одиночного деплоя (см. ниже) репо умеет разворачиваться сразу
-как **ферма из 5 Render-сервисов** — Boss + 4 Department Lead'а
-(Research / Debate / Coder / DevOps). Каждый сервис — это та же
-кодовая база, активированная разной `BOT_PERSONA`.
+Помимо одиночного деплоя (см. ниже) репо разворачивается как
+**ферма из 20 Render-сервисов** — Boss + 4 Department Lead'а
+(Research / Debate / Coder / DevOps) + 15 worker'ов. Каждый сервис —
+это та же кодовая база, активированная разной `BOT_PERSONA`.
 
 ```
-[lilush-boss]            ←  /start /research /debate /implement /status
-[lilush-research-lead]   ←  ведёт research-отдел (4 scout'а позже)
-[lilush-debate-lead]     ←  ведёт debate-отдел (4 debater'а позже)
-[lilush-coder-lead]      ←  ведёт coder-отдел (3 worker'а позже)
-[lilush-devops-lead]     ←  ведёт DevOps-отдел (4 worker'а позже)
+Leadership (5):
+  [lilush-boss]                /start /research /debate /implement /status
+  [lilush-research-lead]       координирует research-отдел
+  [lilush-debate-lead]         координирует debate-отдел
+  [lilush-coder-lead]          координирует coder-отдел
+  [lilush-devops-lead]         координирует DevOps-отдел
+
+Research (4):  github-scout, reddit-scout, hn-scout, apify-runner
+Debate (4):    d1-skeptic, d2-optimist, judge, tz-writer
+Coder (3):     devin-spawner, pr-reviewer, tester
+DevOps (4):    watchdog, render-admin, github-admin, archivist
 ```
 
 **Деплой:**
 
-1. Создай 5 ботов в [@BotFather](https://t.me/BotFather) (один уже есть —
-   `@openaiopus_bot` для Boss; нужно ещё 4 для Lead'ов).
+1. Создай ботов в [@BotFather](https://t.me/BotFather) — можешь делать
+   постепенно. Один уже есть — `@openaiopus_bot` для Boss. Для каждого
+   нового бота: `/newbot` → имя → username → токен → Group Privacy: Off.
 2. <https://dashboard.render.com> → **New +** → **Blueprint** → подключи
-   этот репо.
-3. Render прочитает `render.yaml`, найдёт 5 service-блоков и для каждого
-   спросит `BOT_TOKEN` + `ALLOWED_USER_IDS` — вставь.
-4. **Apply Blueprint** — Render развернёт 5 сервисов параллельно.
-5. В Telegram открой каждого бота → `/start` → нажми **🚀 Запустить и
-   стать владельцем** → выбери мозг (OpenRouter / Devin / Другое) →
-   введи API-ключ через кнопку. Полностью внутри Telegram, никаких
-   env-vars вручную.
+   этот репо (или дай Public Git URL без OAuth).
+3. Render прочитает `render.yaml`, найдёт **20 сервисов** и для каждого
+   спросит `BOT_TOKEN` + `ALLOWED_USER_IDS`. Для ботов которых ещё нет
+   в BotFather — **оставь поле пустым**. Эти сервисы поднимутся в
+   **dormant-режиме** (только `/healthz`, не падают, ничего не тратят).
+4. **Apply Blueprint** — Render развернёт 20 сервисов параллельно.
+5. Активные боты в Telegram: `/start` → **🚀 Запустить и стать
+   владельцем** → выбери мозг → введи API-ключ. Полностью в TG.
+6. Dormant-сервисы активируются позже: Render dashboard → нужный
+   сервис → **Environment** → впиши `BOT_TOKEN` → Save → бот
+   автоматом перезапустится в обычном режиме.
 
 Каждый бот получает свой 1GB persistent disk на `/data` и
-само-пингует свой `/healthz` каждые 4-7 минут, чтобы Render Free не
-засыпал.
+само-пингует свой `/healthz` каждые 4-7 минут (только активные —
+dormant сервис не пингает себя, просто спит).
 
-**Масштабирование до 20 ботов** (позже): редактируй `bot/persona.py`
-(roster уже содержит все 20 ролей) и регенерируй `render.yaml`:
+**Кастомизировать список ролей:** редактируй `bot/persona.py` и
+регенерируй `render.yaml`:
 
 ```bash
-python scripts/gen_render_yaml.py            # все 20 service'ов
-python scripts/gen_render_yaml.py --first 5  # только текущая пятёрка (default)
+python scripts/gen_render_yaml.py            # все 20 service'ов (default)
+python scripts/gen_render_yaml.py --first 5  # только boss + 4 lead'а
 ```
 
 ## 🛠 Архитектура (кратко)

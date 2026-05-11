@@ -28,15 +28,19 @@ HEADER = """# Render Blueprint — https://render.com/docs/infrastructure-as-cod
 # service blocks. Edit bot/persona.py to add/rename personas, then
 # regenerate:
 #
-#     python scripts/gen_render_yaml.py --first 5      # current farm
-#     python scripts/gen_render_yaml.py                # full 20-bot farm
+#     python scripts/gen_render_yaml.py --first 5    # boss + 4 leads
+#     python scripts/gen_render_yaml.py              # full 20-bot farm
 #
 # Usage on Render:
 #   1. https://dashboard.render.com → New + → Blueprint
 #   2. Connect this GitHub repo
 #   3. Render reads this file and asks for each service's BOT_TOKEN
+#      — leave it EMPTY for any bot you haven't created in BotFather
+#      yet. Those services boot in dormant mode (only /healthz).
 #   4. Apply → each service auto-deploys with its own 1GB persistent disk
 #   5. /start each bot in Telegram → claim ownership → /setup → API key
+#   6. To activate a dormant bot later: Render dashboard → service →
+#      Environment → set BOT_TOKEN → save (service auto-restarts)
 
 services:
 """
