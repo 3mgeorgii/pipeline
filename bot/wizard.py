@@ -566,10 +566,22 @@ async def capture_api_key(message: Message, state: FSMContext) -> None:
     if not key:
         await message.answer("Пустое сообщение, попробуй ещё раз или нажми «Сменить мозг».")
         return
-    # Delete the message with the secret first, then save.
+    # Save FIRST, then delete the message with the secret. If save fails we
+    # want the user to be able to retry without re-typing the key blind.
+    try:
+        # The agent always reads the API key from the "openrouter" slot
+        # regardless of provider (custom endpoints reuse this slot — only
+        # base_url differs). Saving under any other label silently breaks
+        # auth for custom endpoints, so we pin to "openrouter" here.
+        storage.set_provider_key("openrouter", key)
+    except Exception as exc:  # noqa: BLE001 — surface to the user, don't crash
+        await message.answer(
+            f"Не удалось сохранить ключ: <code>{_html_escape(str(exc))}</code>\n"
+            "Попробуй ещё раз или напиши /cancel."
+        )
+        return
     with contextlib.suppress(Exception):
         await message.delete()
-    storage.set_provider_key(_provider_label_from_storage(), key)
     await state.clear()
     summary = _config_summary()
     await message.answer(
