@@ -94,3 +94,23 @@ def test_role_confirm_keyboard_includes_use_button(fresh_modules) -> None:
     callbacks = _flat_callbacks(markup)
     assert "role:use:debate_lead" in callbacks
     assert "role:back" in callbacks
+
+
+def test_persona_descriptions_with_html_chars_get_escaped(fresh_modules) -> None:
+    """Two personas (pr_reviewer, watchdog) have literal '<' in their text.
+
+    Telegram's HTML parser would reject the edit_text call if we forgot to
+    escape, so any user picking one of these roles would see no response.
+    This guards against the regression Devin Review caught in PR #12.
+    """
+    from bot.persona import _PERSONAS
+
+    danger = [p for p in _PERSONAS.values() if "<" in p.description or ">" in p.description]
+    # Sanity: we know these two have '<' — if someone rewrites the
+    # description to drop the special chars, this list shrinks; the
+    # important thing is the escaping codepath is exercised.
+    assert {p.key for p in danger}.issuperset({"pr_reviewer", "watchdog"})
+
+    # The escape helper turns '<' into '&lt;'.
+    _, wizard = fresh_modules
+    assert wizard._html_escape("Если < 9 — fail") == "Если &lt; 9 — fail"

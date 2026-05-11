@@ -238,7 +238,7 @@ async def cmd_start_wizard(message: Message, state: FSMContext) -> None:
         await message.answer(
             f"<b>Привет! Я {persona.display_name}.</b>\n"
             f"<i>{persona.title}</i>\n\n"
-            f"{persona.description}\n\n"
+            f"{_html_escape(persona.description)}\n\n"
             "Ты только что развернул мой контейнер. Я не знаю кому теперь подчиняться — "
             "первый человек, кто нажмёт кнопку ниже, станет владельцем (только он сможет писать мне дальше).\n\n"
             f"Твой Telegram id: <code>{user.id}</code>",
@@ -837,7 +837,7 @@ async def cb_role(query: CallbackQuery, state: FSMContext) -> None:
                 f"<b>{persona.display_name}</b>\n"
                 f"<i>{persona.title}</i>\n"
                 f"Отдел: <code>{persona.department}</code> • Ранг: <code>{persona.rank}</code>\n\n"
-                f"{persona.description}{same_note}",
+                f"{_html_escape(persona.description)}{same_note}",
                 reply_markup=_kb_role_confirm(persona.key),
             )
         return
