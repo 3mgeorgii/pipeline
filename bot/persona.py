@@ -281,12 +281,25 @@ _PERSONAS: dict[str, Persona] = {
 def get_persona(key: str | None = None) -> Persona:
     """Resolve the active persona for this process.
 
-    With ``key=None`` reads ``BOT_PERSONA`` env var (defaults to "boss").
-    Falls back to ``boss`` for an unknown value so a typo in env config
-    doesn't crash the bot — just logs a warning at startup.
+    Resolution order when ``key=None``:
+      1. ``storage.get_persona_override()`` — set via ``/role`` from TG.
+      2. ``BOT_PERSONA`` env var (defaults to "boss").
+
+    The override layer lets the owner reassign a deployed bot's role
+    without re-deploying or editing Render env vars. Falls back to
+    ``boss`` for an unknown value so a typo in env config doesn't crash
+    the bot — just silently uses the boss persona.
     """
     if key is None:
-        key = os.environ.get("BOT_PERSONA", "boss").strip().lower()
+        # Lazy import — storage imports config which imports persona for
+        # other paths; deferring this keeps the module graph acyclic.
+        try:
+            from .storage import storage as _storage
+
+            override = _storage.get_persona_override()
+        except Exception:  # noqa: BLE001 — storage not ready (early boot)
+            override = None
+        key = override or os.environ.get("BOT_PERSONA", "boss").strip().lower()
     persona = _PERSONAS.get(key)
     if persona is None:
         # Last-resort fallback to keep the bot bootable.

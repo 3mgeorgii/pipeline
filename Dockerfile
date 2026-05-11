@@ -15,7 +15,7 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         git ca-certificates curl gnupg \
         # Chrome runtime dependencies (libs needed by headless Chrome) —
-        # let agent-browser install Chrome itself, we only ship the libs.
+        # let agent-browser / browser-harness install Chrome itself.
         libnss3 libatk1.0-0 libatk-bridge2.0-0 libcups2 libxkbcommon0 \
         libxcomposite1 libxdamage1 libxfixes3 libxrandr2 libgbm1 \
         libpango-1.0-0 libcairo2 libasound2 libdrm2 fonts-liberation \
@@ -29,6 +29,14 @@ RUN apt-get update \
 # Chrome under /data so it persists across redeploys without bloating
 # the image.
 RUN npm install -g agent-browser@latest
+
+# Install browser-harness (self-healing CDP harness from browser-use).
+# Cloned to /opt so it's outside the app code; installed editable so
+# the agent's runtime edits to agent-workspace/agent_helpers.py
+# persist across the running bot's lifetime. Researcher bots invoke
+# the `browser-harness` binary through the shell-tool.
+RUN git clone --depth=1 https://github.com/browser-use/browser-harness /opt/browser-harness \
+    && pip install --no-cache-dir -e /opt/browser-harness
 
 # python deps
 COPY requirements.txt /app/requirements.txt

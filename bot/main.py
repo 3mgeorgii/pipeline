@@ -27,6 +27,7 @@ from .config import (
     WORKER_POLL_INTERVAL_S,
 )
 from .handlers import router
+from .heartbeat import heartbeat_loop
 from .jobs import get_default_queue
 from .persona import get_persona, known_keys
 from .storage import storage
@@ -169,6 +170,7 @@ async def _run_polling() -> None:
     worker_tasks = [asyncio.create_task(w.run(), name=f"worker:{w.kind}") for w in workers]
 
     keepalive_task = asyncio.create_task(_keep_alive_loop())
+    heartbeat_task = asyncio.create_task(heartbeat_loop(), name="heartbeat")
     logger.info("starting polling with %d workers", len(workers))
     try:
         await dp.start_polling(bot)
@@ -176,7 +178,8 @@ async def _run_polling() -> None:
         for w in workers:
             w.stop()
         keepalive_task.cancel()
-        for task in (*worker_tasks, keepalive_task):
+        heartbeat_task.cancel()
+        for task in (*worker_tasks, keepalive_task, heartbeat_task):
             with contextlib.suppress(asyncio.CancelledError, Exception):
                 await task
         await runner.cleanup()
@@ -194,6 +197,7 @@ def _run_webhook() -> None:
     dp = _build_dispatcher()
     workers: list[Worker] = []
     worker_tasks: list[asyncio.Task[None]] = []
+    bg_tasks: list[asyncio.Task[None]] = []
 
     async def _on_startup(app: web.Application) -> None:
         logger.info("setting webhook to %s", WEBHOOK_URL)
@@ -203,13 +207,16 @@ def _run_webhook() -> None:
         workers.extend(_build_workers())
         for w in workers:
             worker_tasks.append(asyncio.create_task(w.run(), name=f"worker:{w.kind}"))
-        logger.info("started %d workers", len(workers))
+        bg_tasks.append(asyncio.create_task(heartbeat_loop(), name="heartbeat"))
+        logger.info("started %d workers + heartbeat", len(workers))
 
     async def _on_cleanup(app: web.Application) -> None:
         logger.info("removing webhook")
         for w in workers:
             w.stop()
-        for task in worker_tasks:
+        for task in bg_tasks:
+            task.cancel()
+        for task in (*worker_tasks, *bg_tasks):
             with contextlib.suppress(asyncio.CancelledError, Exception):
                 await task
         try:

@@ -1,4 +1,5 @@
 import logging
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 
 from openai import AsyncOpenAI
@@ -13,7 +14,17 @@ from .config import (
     OPENROUTER_BASE_URL,
 )
 from .storage import storage
+from .token_tracker import record as record_token_usage
 from .tools import TOOL_DEFINITIONS, ToolError, dispatch_tool
+
+# Coroutine the agent calls to push a mini-status string to the user
+# ("🔄 Думаю...", "🔄 Вызываю tool list_dir", "✅ Готово", ...).
+# Empty no-op default is used in non-Telegram contexts (tests / CLI).
+StatusUpdate = Callable[[str], Awaitable[None]]
+
+
+async def _noop_status(_: str) -> None:
+    return None
 
 logger = logging.getLogger(__name__)
 
@@ -88,7 +99,10 @@ def _build_messages(user_id: int, user_text: str) -> list[dict]:
     )
 
 
-async def _call_model(client: AsyncOpenAI, messages: list[dict]) -> tuple[object, str]:
+async def _call_model(
+    client: AsyncOpenAI, messages: list[dict], purpose: str = "chat"
+) -> tuple[object, str]:
+    """Call the active model with fallback. Logs token usage on success."""
     last_error: Exception | None = None
     for model in _candidate_models():
         try:
@@ -99,6 +113,20 @@ async def _call_model(client: AsyncOpenAI, messages: list[dict]) -> tuple[object
                 tool_choice="auto",
                 temperature=0.2,
             )
+            usage = getattr(resp, "usage", None)
+            if usage is not None:
+                pt = getattr(usage, "prompt_tokens", 0) or 0
+                ct = getattr(usage, "completion_tokens", 0) or 0
+                try:
+                    record_token_usage(
+                        provider=storage.get_provider(),
+                        model=model,
+                        prompt_tokens=int(pt),
+                        completion_tokens=int(ct),
+                        purpose=purpose,
+                    )
+                except Exception:  # noqa: BLE001 — never crash on stats
+                    logger.exception("token-tracker recording failed")
             return resp.choices[0].message, model
         except APIError as exc:
             logger.warning("model %s failed: %s", model, exc)
@@ -106,14 +134,26 @@ async def _call_model(client: AsyncOpenAI, messages: list[dict]) -> tuple[object
     raise RuntimeError(f"all models failed: {last_error}")
 
 
-async def run_agent(user_id: int, user_text: str, cwd: Path | None) -> str:
+async def run_agent(
+    user_id: int,
+    user_text: str,
+    cwd: Path | None,
+    on_status: StatusUpdate | None = None,
+) -> str:
+    """Run the agent loop. ``on_status`` is called with progress strings
+    for the mini-status indicator (caller edits a single TG message)."""
+    status = on_status or _noop_status
+
     client = _build_client()
     messages = _build_messages(user_id, user_text)
     final_text = ""
     requested_model = storage.get_model() or DEFAULT_MODEL
     used_model = requested_model
 
-    for _step in range(AGENT_MAX_STEPS):
+    await status(f"🔄 Думаю... ({requested_model})")
+
+    for step in range(AGENT_MAX_STEPS):
+        await status(f"🔄 Шаг {step + 1}: вызываю LLM…")
         msg, used_model = await _call_model(client, messages)
         tool_calls = getattr(msg, "tool_calls", None) or []
 
@@ -135,6 +175,10 @@ async def run_agent(user_id: int, user_text: str, cwd: Path | None) -> str:
         if not tool_calls:
             final_text = msg.content or ""
             break
+
+        # Surface tool activity to the user so they see what the bot is doing.
+        names = ", ".join(tc.function.name for tc in tool_calls)
+        await status(f"🔧 Шаг {step + 1}: использую {names}")
 
         for tc in tool_calls:
             try:
@@ -163,4 +207,5 @@ async def run_agent(user_id: int, user_text: str, cwd: Path | None) -> str:
 
     if used_model != requested_model:
         final_text = f"[fallback model: {used_model}]\n{final_text}"
+    await status("✅ Готово")
     return final_text or "(пустой ответ)"

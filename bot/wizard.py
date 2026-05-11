@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import contextlib
 import logging
+import os
 
 from aiogram import F, Router
 from aiogram.filters import Command, StateFilter
@@ -39,7 +40,7 @@ from aiogram.types import (
     Message,
 )
 
-from .persona import get_persona
+from .persona import get_persona, list_personas
 from .storage import storage
 
 logger = logging.getLogger(__name__)
@@ -71,12 +72,88 @@ def _kb_claim() -> InlineKeyboardMarkup:
 
 
 def _kb_brain() -> InlineKeyboardMarkup:
+    hb_label = (
+        "💓 Heartbeat OpenRouter: ON"
+        if storage.get_heartbeat_enabled()
+        else "💤 Heartbeat OpenRouter: OFF"
+    )
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [InlineKeyboardButton(text="🧠 OpenRouter (бесплатно/платно, рекомендую)", callback_data="brain:openrouter")],
             [InlineKeyboardButton(text="🎯 Devin.ai (ручные ответы через шелл)", callback_data="brain:devin")],
             [InlineKeyboardButton(text="⚙️  Другое (свой OpenAI-совместимый endpoint)", callback_data="brain:other")],
             [InlineKeyboardButton(text="🛠 Внешние API (Apify, Firecrawl, Tavily, ...)", callback_data="ext:menu")],
+            [InlineKeyboardButton(text=hb_label, callback_data="brain:heartbeat_toggle")],
+        ]
+    )
+
+
+def _kb_main_after_claim() -> InlineKeyboardMarkup:
+    """Top-level menu shown to an authenticated owner after /start.
+
+    Provides quick links into the most common flows so the owner does
+    not have to remember slash-commands.
+    """
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="📥 Скачать видео", callback_data="main:download")],
+            [InlineKeyboardButton(text="🎭 Сменить роль (/role)", callback_data="main:role")],
+            [InlineKeyboardButton(text="🧠 Перенастроить мозг", callback_data="main:brain")],
+            [InlineKeyboardButton(text="📊 Статистика токенов (/tokens)", callback_data="main:tokens")],
+        ]
+    )
+
+
+def _kb_role_picker() -> InlineKeyboardMarkup:
+    """Grid of every persona + 'Info' + 'Back' buttons.
+
+    Each persona button switches the bot's role on click (with a confirm
+    step). 20 entries arranged 2 per row keeps the keyboard compact on
+    mobile.
+    """
+    personas = list_personas()
+    rows: list[list[InlineKeyboardButton]] = []
+    active = get_persona().key
+    for i in range(0, len(personas), 2):
+        row: list[InlineKeyboardButton] = []
+        for p in personas[i : i + 2]:
+            marker = "▶ " if p.key == active else ""
+            row.append(
+                InlineKeyboardButton(
+                    text=f"{marker}{p.display_name}",
+                    callback_data=f"role:pick:{p.key}",
+                )
+            )
+        rows.append(row)
+    rows.append(
+        [
+            InlineKeyboardButton(text="ℹ️ Инфо о ролях", callback_data="role:info"),
+            InlineKeyboardButton(text="◀️ Назад", callback_data="role:back"),
+        ]
+    )
+    # If an override is active, show a button to revert to env-var default.
+    if storage.get_persona_override() is not None:
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    text="🗑 Сбросить override (вернуться к BOT_PERSONA)",
+                    callback_data="role:reset",
+                )
+            ]
+        )
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def _kb_role_confirm(persona_key: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="✅ Использовать эту роль",
+                    callback_data=f"role:use:{persona_key}",
+                )
+            ],
+            [InlineKeyboardButton(text="◀️ Назад", callback_data="role:back")],
         ]
     )
 
@@ -177,11 +254,22 @@ async def cmd_start_wizard(message: Message, state: FSMContext) -> None:
         )
         return
 
+    override = storage.get_persona_override()
+    extra = (
+        f"\n<i>(роль переопределена через /role — env BOT_PERSONA={_html_escape(os.environ.get('BOT_PERSONA', 'boss'))})</i>"
+        if override is not None
+        else ""
+    )
     await message.answer(
-        f"<b>{persona.display_name}</b> на связи. Ты владелец. Что хочешь?\n"
-        "• Перенастроить мозг — кнопки ниже\n"
-        "• Посмотреть команды — /help",
-        reply_markup=_kb_brain(),
+        f"<b>{persona.display_name}</b> на связи. Ты владелец.{extra}\n\n"
+        f"<i>{persona.title}</i>\n\n"
+        "Что хочешь? Жми кнопку или используй команду:\n"
+        "• <code>/dl &lt;url&gt;</code> — скачать видео в конвейер\n"
+        "• <code>/role</code> — сменить роль этого бота\n"
+        "• <code>/setup</code> — перенастроить мозг\n"
+        "• <code>/tokens</code> — статистика токенов\n"
+        "• <code>/help</code> — все команды",
+        reply_markup=_kb_main_after_claim(),
     )
 
 
@@ -226,6 +314,17 @@ async def cb_brain(query: CallbackQuery, state: FSMContext) -> None:
 
     choice = (query.data or "").split(":", 1)[1]
     await state.clear()
+
+    if choice == "heartbeat_toggle":
+        new_state = not storage.get_heartbeat_enabled()
+        storage.set_heartbeat_enabled(new_state)
+        await query.answer(
+            f"Heartbeat OpenRouter: {'ON' if new_state else 'OFF'}", show_alert=False
+        )
+        if query.message is not None:
+            with contextlib.suppress(Exception):
+                await query.message.edit_reply_markup(reply_markup=_kb_brain())
+        return
 
     if choice == "devin":
         # Switch to brain=devin, show the prompt the owner gives to a fresh Devin session.
@@ -559,6 +658,208 @@ async def capture_url(message: Message, state: FSMContext) -> None:
         f"URL сохранён: <code>{_html_escape(url)}</code>\n\n{summary}",
         reply_markup=_kb_llm_config(_provider_label_from_storage()),
     )
+
+
+# ---- /main:* — top-level menu callbacks shortcuts -----------------------
+
+
+@wizard_router.callback_query(F.data.startswith("main:"))
+async def cb_main_menu(query: CallbackQuery, state: FSMContext) -> None:
+    """Handle clicks on the top-level main menu shown after /start."""
+    user = query.from_user
+    if not _is_owner(user.id):
+        await query.answer("Только владелец.", show_alert=True)
+        return
+    action = (query.data or "").split(":", 1)[1]
+    await state.clear()
+
+    if action == "download":
+        await query.answer()
+        if query.message is not None:
+            await query.message.answer(
+                "<b>📥 Скачать видео</b>\n\n"
+                "Пришли ссылку командой:\n"
+                "<code>/dl &lt;url&gt;</code>\n\n"
+                "Поддерживаются YouTube, Vimeo, TikTok, прямые .mp4 — "
+                "всё что глотает yt-dlp.\n\n"
+                "После /dl смотри статус через /jobs."
+            )
+        return
+
+    if action == "role":
+        await query.answer()
+        await _show_role_picker(query, state)
+        return
+
+    if action == "brain":
+        await query.answer()
+        if query.message is not None:
+            await query.message.edit_text(
+                "Перенастройка. Выбери мозг:",
+                reply_markup=_kb_brain(),
+            )
+        return
+
+    if action == "tokens":
+        await query.answer()
+        if query.message is not None:
+            from .token_tracker import format_token_stats
+
+            await query.message.answer(format_token_stats())
+        return
+
+    await query.answer("Неизвестный пункт меню", show_alert=True)
+
+
+# ---- /role — pick a persona for this bot --------------------------------
+
+
+async def _show_role_picker(
+    query: CallbackQuery | None = None, state: FSMContext | None = None
+) -> None:
+    """Render the role-picker UI; reused by /role command and main-menu button."""
+    text = _role_picker_text()
+    markup = _kb_role_picker()
+    if query is not None and query.message is not None:
+        # Try to edit the existing menu in place; if that fails (different
+        # message type, etc.), send a fresh one.
+        try:
+            await query.message.edit_text(text, reply_markup=markup)
+        except Exception:  # noqa: BLE001 — edit_text raises on inline-kb mismatch
+            await query.message.answer(text, reply_markup=markup)
+
+
+def _role_picker_text() -> str:
+    """The header shown above the persona grid."""
+    active = get_persona()
+    override = storage.get_persona_override()
+    env_persona = os.environ.get("BOT_PERSONA", "boss").strip().lower()
+    if override is not None:
+        source = (
+            f"override (через /role) — env BOT_PERSONA=<code>{_html_escape(env_persona)}</code>"
+        )
+    else:
+        source = "env BOT_PERSONA"
+    return (
+        "<b>🎭 Сменить роль этого бота</b>\n\n"
+        f"Сейчас активна: <b>{active.display_name}</b> "
+        f"(<code>{active.key}</code>, {source})\n"
+        f"<i>{active.title}</i>\n\n"
+        "Жми на роль чтобы её посмотреть и активировать. ▶ — текущая. "
+        "После клика я попрошу подтвердить. Все 20 ролей ниже:"
+    )
+
+
+@wizard_router.message(Command("role"))
+async def cmd_role(message: Message, state: FSMContext) -> None:
+    """Show the role picker to the owner."""
+    user = message.from_user
+    if user is None or not _is_owner(user.id):
+        await message.answer("Только владелец может менять роль.")
+        return
+    await state.clear()
+    await message.answer(_role_picker_text(), reply_markup=_kb_role_picker())
+
+
+@wizard_router.callback_query(F.data.startswith("role:"))
+async def cb_role(query: CallbackQuery, state: FSMContext) -> None:
+    if not _is_owner(query.from_user.id):
+        await query.answer("Только владелец.", show_alert=True)
+        return
+    action = (query.data or "").split(":", 1)[1]
+    await state.clear()
+
+    if action == "back":
+        await query.answer()
+        if query.message is not None:
+            persona = get_persona()
+            await query.message.edit_text(
+                f"<b>{persona.display_name}</b> на связи. Ты владелец.\n\n"
+                f"<i>{persona.title}</i>\n\n"
+                "Что хочешь?",
+                reply_markup=_kb_main_after_claim(),
+            )
+        return
+
+    if action == "info":
+        await query.answer()
+        if query.message is not None:
+            lines = ["<b>ℹ️ Все 20 ролей фермы</b>", ""]
+            for p in list_personas():
+                lines.append(
+                    f"<b>{p.display_name}</b> (<code>{p.key}</code>) — "
+                    f"{p.department}/{p.rank}"
+                )
+                lines.append(f"  <i>{p.title}</i>")
+                lines.append(f"  {_html_escape(p.description)}")
+                lines.append("")
+            lines.append("◀️ Назад — кнопка ниже.")
+            await query.message.answer(
+                "\n".join(lines),
+                reply_markup=InlineKeyboardMarkup(
+                    inline_keyboard=[
+                        [InlineKeyboardButton(text="◀️ Назад к ролям", callback_data="role:back_to_picker")]
+                    ]
+                ),
+                disable_web_page_preview=True,
+            )
+        return
+
+    if action == "back_to_picker":
+        await query.answer()
+        if query.message is not None:
+            await query.message.answer(_role_picker_text(), reply_markup=_kb_role_picker())
+        return
+
+    if action == "reset":
+        storage.clear_persona_override()
+        await query.answer("Override снят, возвращаюсь к BOT_PERSONA из env")
+        if query.message is not None:
+            await query.message.edit_text(_role_picker_text(), reply_markup=_kb_role_picker())
+        return
+
+    if action.startswith("pick:"):
+        persona_key = action.split(":", 1)[1]
+        from .persona import get_persona as _get
+
+        persona = _get(persona_key)
+        await query.answer()
+        if query.message is not None:
+            current = get_persona()
+            already = persona.key == current.key
+            same_note = (
+                "\n\n<i>Сейчас эта роль уже активна — нажми «Использовать» чтобы "
+                "закрепить override.</i>"
+                if already
+                else ""
+            )
+            await query.message.edit_text(
+                f"<b>{persona.display_name}</b>\n"
+                f"<i>{persona.title}</i>\n"
+                f"Отдел: <code>{persona.department}</code> • Ранг: <code>{persona.rank}</code>\n\n"
+                f"{persona.description}{same_note}",
+                reply_markup=_kb_role_confirm(persona.key),
+            )
+        return
+
+    if action.startswith("use:"):
+        persona_key = action.split(":", 1)[1]
+        storage.set_persona_override(persona_key)
+        from .persona import get_persona as _get
+
+        persona = _get(persona_key)
+        await query.answer(f"Роль: {persona.display_name}")
+        if query.message is not None:
+            await query.message.edit_text(
+                f"<b>✅ Готово. Теперь я — {persona.display_name}.</b>\n"
+                f"<i>{persona.title}</i>\n\n"
+                "Override сохранён в state.json. Чтобы вернуться к роли из "
+                "BOT_PERSONA — открой <code>/role</code> → 🗑 Сбросить override.",
+                reply_markup=_kb_main_after_claim(),
+            )
+        return
+
+    await query.answer("Неизвестная команда роли", show_alert=True)
 
 
 # ---- Misc helpers --------------------------------------------------------

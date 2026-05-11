@@ -46,7 +46,7 @@ router.message.middleware(_InboxLoggerMiddleware())
 
 
 HELP_TEXT = (
-    "<b>Lilush</b> — Telegram-бот + видео-конвейер для шортсов\n"
+    "<b>Lilush</b> — Telegram-бот + видео-конвейер + farm-роль для распределённой работы\n"
     "Brain: <code>{brain}</code> | model: <code>{model}</code> {state}\n\n"
     "<b>📹 Видео-конвейер</b>\n"
     "Кидаешь ссылку → скачиваю → транскрибирую → нарезаю на 3 шортса 1080×1920 → пишу SEO → собираю release-пакет.\n\n"
@@ -58,12 +58,19 @@ HELP_TEXT = (
     "  3️⃣ <b>edit</b> — ffmpeg vertical crop 1080×1920 + опциональный logo-overlay\n"
     "  4️⃣ <b>seo</b> — pytrends Google Trends + LLM/template title/description/tags\n"
     "  5️⃣ <b>publish</b> — DRY-RUN: clip.mp4 + youtube.json + tiktok.json + instagram.json в data/releases/&lt;id&gt;/\n\n"
-    "После /dl можешь сразу кидать следующую ссылку — все 5 воркеров крутятся параллельно (download #2 пока edit #1 пока seo #0).\n\n"
+    "После /dl можешь сразу кидать следующую ссылку — все 5 воркеров крутятся параллельно.\n\n"
     "<b>💬 LLM-чат</b>\n"
-    "Любое сообщение без <code>/</code> уходит в текущий brain. <code>auto</code> = бот сам отвечает через OpenRouter; <code>devin</code> = пишет в inbox.log и ждёт меня.\n\n"
+    "Любое сообщение без <code>/</code> уходит в текущий brain. <code>auto</code> = бот сам отвечает через OpenRouter (Kimi / Opus / GPT — что выбрал в /setmodel); <code>devin</code> = пишет в inbox.log и ждёт меня.\n\n"
     "<b>Старт / настройка</b>\n"
-    "/start — онбординг (первый /start = ты владелец)\n"
-    "/setup — заново выбрать мозг и ввести ключи через кнопки\n\n"
+    "/start — главное меню + кнопки «Скачать видео», «Сменить роль», «Мозг», «Токены»\n"
+    "/setup — заново выбрать мозг и ввести ключи через кнопки\n"
+    "/role — сменить роль этого бота (20 кнопок персон, override BOT_PERSONA из env)\n\n"
+    "<b>🛠 Внешние API (research/scraping)</b>\n"
+    "В /setup → 🛠 Внешние API — Apify, Firecrawl, Tavily, Brave Search, Exa, GitHub PAT.\n"
+    "Researcher-боты используют их для поиска данных вне TG.\n\n"
+    "<b>📊 Расход и здоровье</b>\n"
+    "/tokens — статистика token spend (сегодня / неделя / всего), оценка стоимости\n"
+    "Heartbeat OpenRouter — в /setup кнопка <code>💓 ON / 💤 OFF</code>: бот периодически пингует OpenRouter (1 токен раз в 10 мин) чтобы держать сессию тёплой\n\n"
     "<b>Проекты (для /exec /git)</b>\n"
     "/projects — список загруженных проектов\n"
     "/clone &lt;git-url&gt; [имя] — клонировать репо\n"
@@ -411,6 +418,20 @@ async def cmd_jobs(message: Message) -> None:
     await message.answer("\n".join(lines))
 
 
+# ---- /tokens (LLM token spend stats) -------------------------------------
+
+
+@router.message(Command("tokens"))
+async def cmd_tokens(message: Message) -> None:
+    """Show aggregated LLM-token usage from the local log."""
+    if not _is_authorized(message):
+        await _deny(message)
+        return
+    from .token_tracker import format_token_stats
+
+    await message.answer(format_token_stats())
+
+
 # ---- /keys, /setkey, /delkey ---------------------------------------------
 
 
@@ -598,6 +619,56 @@ async def cmd_setbrain(message: Message, command: CommandObject) -> None:
 # ---- text handler ---------------------------------------------------------
 
 
+def _make_status_updater(message: Message) -> tuple[Callable[[str], Awaitable[None]], Callable[[], Awaitable[None]]]:
+    """Build a status-update closure that edits a single TG message in place.
+
+    Returns ``(update, finish)``:
+      * ``update(text)`` — first call sends a fresh message; subsequent calls
+        edit that same message. Heavily rate-limited so we don't trigger
+        Telegram's flood control.
+      * ``finish()`` — best-effort delete the status message (the real
+        answer is sent afterwards).
+
+    Falls back gracefully if Telegram refuses any edit (same text, too
+    rapid, message gone, etc.) — never raises into the agent loop.
+    """
+    import time
+
+    state: dict = {"msg": None, "last_text": "", "last_edit": 0.0}
+    _MIN_EDIT_INTERVAL = 0.8  # seconds — TG soft limit is ~1 edit / 1s
+
+    async def update(text: str) -> None:
+        text = text.strip() or "🔄"
+        now = time.monotonic()
+        if state["msg"] is None:
+            try:
+                state["msg"] = await message.answer(text)
+                state["last_text"] = text
+                state["last_edit"] = now
+            except Exception:  # noqa: BLE001
+                logger.debug("status: send failed", exc_info=True)
+            return
+        if text == state["last_text"]:
+            return
+        if now - state["last_edit"] < _MIN_EDIT_INTERVAL:
+            return
+        try:
+            await state["msg"].edit_text(text)
+            state["last_text"] = text
+            state["last_edit"] = now
+        except Exception:  # noqa: BLE001
+            logger.debug("status: edit failed", exc_info=True)
+
+    async def finish() -> None:
+        msg = state["msg"]
+        if msg is None:
+            return
+        with contextlib.suppress(Exception):
+            await msg.delete()
+
+    return update, finish
+
+
 @router.message(F.text & ~F.text.startswith("/"))
 async def handle_text(message: Message) -> None:
     if not _is_authorized(message):
@@ -618,15 +689,19 @@ async def handle_text(message: Message) -> None:
         return
     cwd = storage.get_cwd(user_id) if user_id is not None else None
     await message.bot.send_chat_action(message.chat.id, "typing")
+    on_status, finish_status = _make_status_updater(message)
     try:
-        answer = await run_agent(user_id or 0, message.text or "", cwd)
+        answer = await run_agent(user_id or 0, message.text or "", cwd, on_status=on_status)
     except NoApiKeyError as exc:
+        await finish_status()
         await message.answer(str(exc))
         return
     except Exception as exc:  # noqa: BLE001
         logger.exception("agent failed")
+        await finish_status()
         await message.answer(f"Ошибка агента: {_html_escape(str(exc))}")
         return
+    await finish_status()
     await _send_long(message, answer, code=False)
 
 

@@ -311,5 +311,86 @@ class Storage:
         self._settings()["base_url"] = url.rstrip("/")
         self._save()
 
+    # ---- persona override (per-bot role change from TG) ------------------
+
+    def get_persona_override(self) -> str | None:
+        """Read TG-set persona override. None = fall back to BOT_PERSONA env var.
+
+        The override is set via the `/role` command and persists across
+        restarts in state.json. Acts as a soft re-assignment without
+        touching Render env vars.
+        """
+        raw = self._settings().get("persona_override")
+        if raw and isinstance(raw, str):
+            return raw.strip().lower() or None
+        return None
+
+    def set_persona_override(self, persona_key: str) -> None:
+        """Lock this bot into a new persona until cleared."""
+        self._settings()["persona_override"] = persona_key.strip().lower()
+        self._save()
+
+    def clear_persona_override(self) -> None:
+        """Remove the override → fall back to BOT_PERSONA env var."""
+        if "persona_override" in self._settings():
+            del self._settings()["persona_override"]
+            self._save()
+
+    # ---- heartbeat OpenRouter (idle ping toggle) -------------------------
+
+    def get_heartbeat_enabled(self) -> bool:
+        """True if OpenRouter heartbeat pings are enabled.
+
+        When enabled, a background task pings the OpenRouter API
+        periodically with a tiny prompt to keep the connection warm
+        (and burn a fraction of free-tier quota). Independent of which
+        provider is currently the active brain.
+        """
+        return bool(self._settings().get("heartbeat_enabled", False))
+
+    def set_heartbeat_enabled(self, enabled: bool) -> None:
+        self._settings()["heartbeat_enabled"] = bool(enabled)
+        self._save()
+
+    # ---- token usage tracking --------------------------------------------
+
+    def log_llm_call(
+        self,
+        provider: str,
+        model: str,
+        prompt_tokens: int,
+        completion_tokens: int,
+        purpose: str = "chat",
+    ) -> None:
+        """Record one LLM call's token usage.
+
+        Stored as a flat list of dicts under ``_settings.token_log``. We
+        cap the log at 5000 entries so state.json stays under a megabyte
+        on long-running bots; older entries roll off FIFO.
+        """
+        import time
+
+        log = self._settings().setdefault("token_log", [])
+        log.append(
+            {
+                "ts": int(time.time()),
+                "provider": provider,
+                "model": model,
+                "prompt_tokens": int(prompt_tokens),
+                "completion_tokens": int(completion_tokens),
+                "purpose": purpose,
+            }
+        )
+        if len(log) > 5000:
+            del log[: len(log) - 5000]
+        self._save()
+
+    def get_token_log(self, since_ts: int = 0) -> list[dict]:
+        """Return token log entries with ``ts >= since_ts``."""
+        log = self._settings().get("token_log", [])
+        if since_ts <= 0:
+            return list(log)
+        return [e for e in log if e.get("ts", 0) >= since_ts]
+
 
 storage = Storage()
