@@ -65,6 +65,46 @@ python scripts/gen_render_yaml.py            # все 20 service'ов (default)
 python scripts/gen_render_yaml.py --first 5  # только boss + 4 lead'а
 ```
 
+### 🔑 Внешние API для research-ботов
+
+Researcher-боты (`github_scout`, `reddit_scout`, `apify_runner`, ...)
+ходят за данными в платные/полу-платные сервисы. Чтобы не сетапить
+их через env vars в Render — добавь ключи прямо из Telegram:
+
+`/setup` → **🛠 Внешние API** → выбери инструмент → пришли ключ
+одним сообщением (бот удалит твоё сообщение после сохранения).
+
+Что поддерживается из коробки:
+
+| Инструмент | Зачем | Где взять |
+|---|---|---|
+| **Apify** | Готовые scrap-actors (Reddit, TikTok, YT, Twitter) | <https://console.apify.com/account/integrations> |
+| **Firecrawl** | Сайт → чистый markdown для LLM | <https://firecrawl.dev/app/api-keys> |
+| **Tavily** | Search-API для AI-агентов | <https://app.tavily.com/home> |
+| **Brave Search** | Альтернатива Google без трекинга | <https://api-dashboard.search.brave.com/app/keys> |
+| **Exa** | Семантический поиск | <https://dashboard.exa.ai/api-keys> |
+| **GitHub PAT** | Поднимает GitHub API rate-limit 60 → 5000/час | <https://github.com/settings/tokens> |
+
+Из кода бота: `storage.get_external_tool_key("apify")` (fallback на
+env var `APIFY_API_TOKEN`).
+
+### 🦊 vercel-labs/agent-browser
+
+`Dockerfile` уже ставит [vercel-labs/agent-browser](https://github.com/vercel-labs/agent-browser)
+глобально (Rust CLI, ~3 МБ). Researcher-боты могут вызывать его через
+shell-tool который у Lilush уже есть:
+
+```python
+# в коде research-бота
+await shell("agent-browser open https://reddit.com/r/ffmpeg")
+await shell("agent-browser snapshot")   # accessibility tree
+await shell("agent-browser get text @e1")
+```
+
+Chrome для headless-режима **не вкомпилирован** в образ — `agent-browser`
+скачивает его лениво в `/data/.cache` на первом запуске (~200 МБ),
+дальше переиспользует благодаря persistent disk.
+
 ## 🛠 Архитектура (кратко)
 
 ```

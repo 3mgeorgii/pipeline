@@ -53,6 +53,10 @@ class SetupStates(StatesGroup):
     awaiting_api_key = State()
     awaiting_model = State()
     awaiting_url = State()
+    # External research/scraping tools (Apify / Firecrawl / Tavily / ...).
+    # We stash the chosen tool name in FSM data so the capture handler
+    # knows which key to save.
+    awaiting_external_tool_key = State()
 
 
 # ---- Keyboards -----------------------------------------------------------
@@ -72,8 +76,36 @@ def _kb_brain() -> InlineKeyboardMarkup:
             [InlineKeyboardButton(text="🧠 OpenRouter (бесплатно/платно, рекомендую)", callback_data="brain:openrouter")],
             [InlineKeyboardButton(text="🎯 Devin.ai (ручные ответы через шелл)", callback_data="brain:devin")],
             [InlineKeyboardButton(text="⚙️  Другое (свой OpenAI-совместимый endpoint)", callback_data="brain:other")],
+            [InlineKeyboardButton(text="🛠 Внешние API (Apify, Firecrawl, Tavily, ...)", callback_data="ext:menu")],
         ]
     )
+
+
+def _kb_external_tools() -> InlineKeyboardMarkup:
+    """Menu of external research/scraping tools the bot may need to log in to.
+
+    Reads the list from ``KNOWN_EXTERNAL_TOOLS`` in storage so adding a new
+    tool there automatically grows the keyboard.
+    """
+    from .storage import KNOWN_EXTERNAL_TOOLS
+
+    keys_state = storage.list_external_tool_keys()
+    rows: list[list[InlineKeyboardButton]] = []
+    for tool, meta in KNOWN_EXTERNAL_TOOLS.items():
+        state = keys_state.get(tool, {})
+        source = state.get("source", "none")
+        marker = "✅" if source == "telegram" else ("🌍" if source == "env" else "⚪️")
+        label = meta["label"]
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    text=f"{marker} {label}",
+                    callback_data=f"ext:set:{tool}",
+                )
+            ]
+        )
+    rows.append([InlineKeyboardButton(text="↩️  Назад к мозгам", callback_data="ext:back")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def _kb_llm_config(provider_label: str) -> InlineKeyboardMarkup:
@@ -234,6 +266,87 @@ async def cb_brain(query: CallbackQuery, state: FSMContext) -> None:
         )
 
 
+# --- /ext:* — external research/scraping tools sub-menu ------------------
+
+
+def _external_tools_summary() -> str:
+    """Pretty list of all known external tools and which are configured."""
+    keys_state = storage.list_external_tool_keys()
+    lines = ["<b>Внешние API</b> (для research/scraping):", ""]
+    for _tool, info in keys_state.items():
+        marker = (
+            "✅"
+            if info["source"] == "telegram"
+            else ("🌍" if info["source"] == "env" else "⚪️")
+        )
+        masked = info["masked"] or "—"
+        lines.append(
+            f"{marker} <b>{info['label']}</b> — <code>{masked}</code>\n"
+            f"   <i>{info['hint']}</i>"
+        )
+    lines.append("")
+    lines.append(
+        "Жми на инструмент — пришлёшь ключ одним сообщением, я его сохраню и "
+        "удалю твоё сообщение. <b>⚪️</b> = не настроено, "
+        "<b>🌍</b> = взято из env-var, <b>✅</b> = задано здесь."
+    )
+    return "\n".join(lines)
+
+
+@wizard_router.callback_query(F.data == "ext:menu")
+async def cb_ext_menu(query: CallbackQuery, state: FSMContext) -> None:
+    if not _is_owner(query.from_user.id):
+        await query.answer("Только владелец.", show_alert=True)
+        return
+    await state.clear()
+    if query.message is not None:
+        await query.message.edit_text(
+            _external_tools_summary(),
+            reply_markup=_kb_external_tools(),
+            disable_web_page_preview=True,
+        )
+    await query.answer()
+
+
+@wizard_router.callback_query(F.data == "ext:back")
+async def cb_ext_back(query: CallbackQuery, state: FSMContext) -> None:
+    if not _is_owner(query.from_user.id):
+        await query.answer("Только владелец.", show_alert=True)
+        return
+    await state.clear()
+    if query.message is not None:
+        await query.message.edit_text(
+            "Выбери мозг:",
+            reply_markup=_kb_brain(),
+        )
+    await query.answer()
+
+
+@wizard_router.callback_query(F.data.startswith("ext:set:"))
+async def cb_ext_set(query: CallbackQuery, state: FSMContext) -> None:
+    if not _is_owner(query.from_user.id):
+        await query.answer("Только владелец.", show_alert=True)
+        return
+    from .storage import KNOWN_EXTERNAL_TOOLS
+
+    tool = (query.data or "").split(":", 2)[-1]
+    if tool not in KNOWN_EXTERNAL_TOOLS:
+        await query.answer("Неизвестный инструмент.", show_alert=True)
+        return
+    meta = KNOWN_EXTERNAL_TOOLS[tool]
+    await state.set_state(SetupStates.awaiting_external_tool_key)
+    await state.update_data(external_tool=tool)
+    if query.message is not None:
+        await query.message.answer(
+            f"Пришли ключ для <b>{meta['label']}</b> одним сообщением. "
+            "Я удалю твоё сообщение как только сохраню.\n\n"
+            f"Получить: <a href='{meta['url']}'>{meta['url']}</a>\n\n"
+            f"<i>{meta['hint']}</i>",
+            disable_web_page_preview=True,
+        )
+    await query.answer()
+
+
 # --- /cfg:* — sub-menu inside OpenRouter / Other --------------------------
 
 
@@ -381,6 +494,48 @@ async def capture_model(message: Message, state: FSMContext) -> None:
     await message.answer(
         f"Модель сохранена: <code>{_html_escape(model)}</code>\n\n{summary}",
         reply_markup=_kb_llm_config(_provider_label_from_storage()),
+    )
+
+
+@wizard_router.message(
+    StateFilter(SetupStates.awaiting_external_tool_key), _NOT_A_COMMAND
+)
+async def capture_external_tool_key(message: Message, state: FSMContext) -> None:
+    """Save an external-tool API key after the user has clicked one in the menu.
+
+    The chosen tool name was stashed in FSM ``data["external_tool"]`` by
+    ``cb_ext_set``; we read it here, persist the key, delete the user's
+    message (to keep the secret out of TG history), and re-show the menu
+    with the updated ✅ marker.
+    """
+    if not _is_owner(message.from_user.id if message.from_user else 0):
+        return
+    data = await state.get_data()
+    tool = str(data.get("external_tool") or "").strip().lower()
+    if not tool:
+        await message.answer(
+            "Не помню для какого инструмента ты задаёшь ключ — открой меню заново через /setup."
+        )
+        await state.clear()
+        return
+    key = (message.text or "").strip()
+    if not key:
+        await message.answer("Пустое сообщение, попробуй ещё раз.")
+        return
+    with contextlib.suppress(Exception):
+        await message.delete()
+    try:
+        storage.set_external_tool_key(tool, key)
+    except ValueError as exc:
+        await message.answer(f"Не получилось сохранить ключ: {exc}")
+        await state.clear()
+        return
+    await state.clear()
+    await message.answer(
+        f"Ключ для <b>{tool}</b> сохранён, твоё сообщение удалено.\n\n"
+        + _external_tools_summary(),
+        reply_markup=_kb_external_tools(),
+        disable_web_page_preview=True,
     )
 
 

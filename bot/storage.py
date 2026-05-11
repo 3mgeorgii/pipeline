@@ -9,12 +9,58 @@ from .config import DATA_DIR, HISTORY_LIMIT, PROJECTS_DIR
 # user-id-keyed entries (Telegram user ids are stringified ints).
 _SETTINGS_KEY = "_settings"
 
-# Providers we know about. Each entry maps to a UI label and the env-var that
-# acts as a fallback when nothing has been set via Telegram.
+# LLM providers we know about. Each entry maps to a UI label and the env-var
+# that acts as a fallback when nothing has been set via Telegram.
 KNOWN_PROVIDERS: dict[str, str] = {
     "openrouter": "OPENROUTER_API_KEY",
     "anthropic": "ANTHROPIC_API_KEY",
     "openai": "OPENAI_API_KEY",
+}
+
+# External research/scraping tools that the bot may need to authenticate
+# against. Researcher-type bots (github_scout, reddit_scout, apify_runner,
+# etc.) read these via ``storage.get_external_tool_key("apify")`` when they
+# perform their work. Each value is the env-var fallback name.
+#
+# Adding a new tool here automatically adds a button to the /setup wizard
+# under "🔑 Внешние API" — no UI changes needed.
+KNOWN_EXTERNAL_TOOLS: dict[str, dict[str, str]] = {
+    "apify": {
+        "env_var": "APIFY_API_TOKEN",
+        "label": "Apify",
+        "url": "https://console.apify.com/account/integrations",
+        "hint": "Готовые scrap-actors для Reddit / TikTok / YT / Twitter и др.",
+    },
+    "firecrawl": {
+        "env_var": "FIRECRAWL_API_KEY",
+        "label": "Firecrawl",
+        "url": "https://firecrawl.dev/app/api-keys",
+        "hint": "Превращает любой сайт в чистый markdown для LLM.",
+    },
+    "tavily": {
+        "env_var": "TAVILY_API_KEY",
+        "label": "Tavily",
+        "url": "https://app.tavily.com/home",
+        "hint": "Search-API для AI-агентов (1000 запросов / мес бесплатно).",
+    },
+    "brave": {
+        "env_var": "BRAVE_SEARCH_API_KEY",
+        "label": "Brave Search",
+        "url": "https://api-dashboard.search.brave.com/app/keys",
+        "hint": "Альтернатива Google без трекинга (2000 / мес бесплатно).",
+    },
+    "exa": {
+        "env_var": "EXA_API_KEY",
+        "label": "Exa",
+        "url": "https://dashboard.exa.ai/api-keys",
+        "hint": "Семантический поиск (1000 / мес бесплатно).",
+    },
+    "github_pat": {
+        "env_var": "GITHUB_RESEARCH_PAT",
+        "label": "GitHub PAT (read-only)",
+        "url": "https://github.com/settings/tokens",
+        "hint": "Personal Access Token (Fine-grained, public-repo read) — поднимает rate-limit с 60 до 5000 запросов/час.",
+    },
 }
 
 
@@ -131,6 +177,62 @@ class Storage:
                 "source": "telegram" if stored else ("env" if env_value else "none"),
                 "masked": _mask_key(active),
                 "env_var": env_var,
+            }
+        return out
+
+    # ---- external research/scraping tools -------------------------------
+
+    def set_external_tool_key(self, tool: str, key: str) -> None:
+        tool = tool.lower()
+        if tool not in KNOWN_EXTERNAL_TOOLS:
+            raise ValueError(
+                f"unknown external tool '{tool}'. known: "
+                f"{', '.join(KNOWN_EXTERNAL_TOOLS)}"
+            )
+        tools = self._settings().setdefault("external_tools", {})
+        tools[tool] = key
+        self._save()
+
+    def delete_external_tool_key(self, tool: str) -> bool:
+        tool = tool.lower()
+        tools = self._settings().get("external_tools", {})
+        if tool in tools:
+            del tools[tool]
+            self._save()
+            return True
+        return False
+
+    def get_external_tool_key(self, tool: str) -> str:
+        """Return the key for ``tool`` from state, falling back to env.
+
+        Used by researcher-type bots (github_scout, apify_runner, etc.) to
+        authenticate against external APIs. Returns empty string if the
+        tool was never configured — callers must handle that explicitly.
+        """
+        tool = tool.lower()
+        stored = self._settings().get("external_tools", {}).get(tool)
+        if stored:
+            return stored
+        meta = KNOWN_EXTERNAL_TOOLS.get(tool)
+        if meta is not None:
+            return os.environ.get(meta["env_var"], "")
+        return ""
+
+    def list_external_tool_keys(self) -> dict[str, dict]:
+        """List known external tools with source + masked preview."""
+        out: dict[str, dict] = {}
+        tools = self._settings().get("external_tools", {})
+        for tool, meta in KNOWN_EXTERNAL_TOOLS.items():
+            stored = tools.get(tool, "")
+            env_value = os.environ.get(meta["env_var"], "")
+            active = stored or env_value
+            out[tool] = {
+                "source": "telegram" if stored else ("env" if env_value else "none"),
+                "masked": _mask_key(active),
+                "env_var": meta["env_var"],
+                "label": meta["label"],
+                "url": meta["url"],
+                "hint": meta["hint"],
             }
         return out
 
