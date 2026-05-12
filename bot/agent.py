@@ -158,7 +158,14 @@ def _build_messages(user_id: int, user_text: str) -> list[dict]:
 async def _call_model(
     client: AsyncOpenAI, messages: list[dict], purpose: str = "chat"
 ) -> tuple[object, str]:
-    """Call the active model with fallback. Logs token usage on success."""
+    """Call the active model with fallback. Logs token usage on success.
+
+    Catches both OpenAI API errors *and* malformed responses (e.g. when a
+    custom endpoint returns a plain-text body or non-OpenAI JSON shape —
+    surfaces as ``AttributeError`` on ``.choices`` or ``TypeError``).
+    The actual response is logged so it's easy to see what the upstream
+    actually sent back.
+    """
     last_error: Exception | None = None
     for model in _candidate_models():
         try:
@@ -170,24 +177,42 @@ async def _call_model(
                 temperature=0.2,
                 max_tokens=AGENT_MAX_TOKENS,
             )
-            usage = getattr(resp, "usage", None)
-            if usage is not None:
-                pt = getattr(usage, "prompt_tokens", 0) or 0
-                ct = getattr(usage, "completion_tokens", 0) or 0
-                try:
-                    record_token_usage(
-                        provider=storage.get_provider(),
-                        model=model,
-                        prompt_tokens=int(pt),
-                        completion_tokens=int(ct),
-                        purpose=purpose,
-                    )
-                except Exception:  # noqa: BLE001 — never crash on stats
-                    logger.exception("token-tracker recording failed")
-            return resp.choices[0].message, model
         except APIError as exc:
-            logger.warning("model %s failed: %s", model, exc)
+            logger.warning("model %s failed (APIError): %s", model, exc)
             last_error = exc
+            continue
+        except Exception as exc:  # noqa: BLE001 — network / parse errors
+            logger.warning("model %s failed (transport): %s", model, exc)
+            last_error = exc
+            continue
+
+        usage = getattr(resp, "usage", None)
+        if usage is not None:
+            pt = getattr(usage, "prompt_tokens", 0) or 0
+            ct = getattr(usage, "completion_tokens", 0) or 0
+            try:
+                record_token_usage(
+                    provider=storage.get_provider(),
+                    model=model,
+                    prompt_tokens=int(pt),
+                    completion_tokens=int(ct),
+                    purpose=purpose,
+                )
+            except Exception:  # noqa: BLE001 — never crash on stats
+                logger.exception("token-tracker recording failed")
+
+        choices = getattr(resp, "choices", None)
+        if not choices:
+            preview = repr(resp)[:300]
+            logger.warning(
+                "model %s returned response without .choices: %s", model, preview
+            )
+            last_error = RuntimeError(
+                f"endpoint returned non-OpenAI response (no choices). "
+                f"First 300 chars: {preview}"
+            )
+            continue
+        return choices[0].message, model
     raise RuntimeError(f"all models failed: {last_error}")
 
 
