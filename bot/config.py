@@ -93,7 +93,15 @@ PROJECTS_DIR.mkdir(parents=True, exist_ok=True)
 JOBS_DB_PATH = DATA_DIR / "jobs.db"
 WORKER_POLL_INTERVAL_S = float(os.environ.get("WORKER_POLL_INTERVAL_S", "1.0"))
 
-EXEC_TIMEOUT = int(os.environ.get("EXEC_TIMEOUT", "30"))
+# Default per-command shell timeout for /exec and the LLM agent's exec_bash
+# tool. Bumped from 30s -> 600s (10 min) so that real-world installs like
+# `pip install -e .` or `playwright install chromium` actually finish on
+# slow free-tier hosts before being killed. Override via env if needed.
+EXEC_TIMEOUT = int(os.environ.get("EXEC_TIMEOUT", "600"))
+# Per-command timeout used by the /work batch flow. Treated as "terminal
+# mode" — no practical limit, so we cap at 1 hour to still rescue truly
+# stuck processes (network hangs, etc.).
+WORK_EXEC_TIMEOUT = int(os.environ.get("WORK_EXEC_TIMEOUT", "3600"))
 MAX_FILE_BYTES = int(os.environ.get("MAX_FILE_BYTES", "200000"))
 HISTORY_LIMIT = int(os.environ.get("HISTORY_LIMIT", "20"))
 AGENT_MAX_STEPS = int(os.environ.get("AGENT_MAX_STEPS", "8"))

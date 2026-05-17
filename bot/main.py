@@ -8,6 +8,7 @@ from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.fsm.storage.memory import MemoryStorage
+from aiogram.types import BotCommand
 from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
 from aiohttp import web
 
@@ -60,6 +61,29 @@ def _build_dispatcher() -> Dispatcher:
 
 async def _health(_: web.Request) -> web.Response:
     return web.Response(text="ok")
+
+
+# Commands shown in Telegram's blue "menu" button next to the message input.
+# Kept short — the full reference lives in /help. /work is the headline
+# entry-point for the batch-terminal flow.
+_BOT_COMMANDS: list[BotCommand] = [
+    BotCommand(command="work", description="Пакетный терминал: список команд по порядку"),
+    BotCommand(command="exec", description="Одна bash-команда в проекте"),
+    BotCommand(command="clone", description="Клонировать git-репо"),
+    BotCommand(command="projects", description="Список проектов"),
+    BotCommand(command="project", description="Переключиться на проект"),
+    BotCommand(command="pwd", description="Текущая папка"),
+    BotCommand(command="cd", description="Сменить субпапку"),
+    BotCommand(command="cancel", description="Выйти из /work"),
+    BotCommand(command="brain", description="Кто отвечает (auto / devin)"),
+    BotCommand(command="setup", description="Настроить ключи и модель"),
+    BotCommand(command="help", description="Справка по командам"),
+]
+
+
+async def _set_bot_commands(bot: Bot) -> None:
+    with contextlib.suppress(Exception):
+        await bot.set_my_commands(_BOT_COMMANDS)
 
 
 def _next_keepalive_delay() -> float:
@@ -151,6 +175,7 @@ async def _run_polling() -> None:
     bot = _build_bot()
     dp = _build_dispatcher()
     await bot.delete_webhook(drop_pending_updates=True)
+    await _set_bot_commands(bot)
 
     health_app = web.Application()
     health_app.router.add_get("/", _health)
@@ -196,6 +221,7 @@ def _run_webhook() -> None:
     async def _on_startup(app: web.Application) -> None:
         logger.info("setting webhook to %s", WEBHOOK_URL)
         await bot.set_webhook(WEBHOOK_URL, drop_pending_updates=True)
+        await _set_bot_commands(bot)
         queue = get_default_queue()
         await queue.init()
         workers.extend(_build_workers())
