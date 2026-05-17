@@ -162,10 +162,17 @@ async def write_file(cwd: Path, path: str, content: str) -> str:
     return f"wrote {len(content)} chars to {path}"
 
 
-async def exec_bash(cwd: Path, command: str) -> str:
+async def exec_bash(cwd: Path, command: str, timeout: int | None = None) -> str:
+    """Run ``command`` in ``cwd`` and return formatted stdout/stderr + exit code.
+
+    ``timeout`` overrides the global ``EXEC_TIMEOUT`` — pass a larger value
+    for batched terminal flows like ``/work`` where 30s/10min isn't enough
+    (e.g. ``pip install``, ``playwright install chromium``).
+    """
     if not cwd:
         raise ToolError("No project selected. Use /clone or /project first.")
-    code, out, err = await _run_shell(command, cwd=cwd)
+    effective_timeout = timeout if timeout is not None else EXEC_TIMEOUT
+    code, out, err = await _run_shell(command, cwd=cwd, timeout=effective_timeout)
     parts = []
     if out:
         parts.append(f"--- stdout ---\n{out}")

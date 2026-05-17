@@ -1,14 +1,17 @@
+import asyncio
 import contextlib
 import logging
 from collections.abc import Awaitable, Callable
 from typing import Any
 
 from aiogram import BaseMiddleware, F, Router
-from aiogram.filters import Command, CommandObject
+from aiogram.filters import Command, CommandObject, StateFilter
+from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import Message, TelegramObject
 
 from .agent import NoApiKeyError, run_agent
-from .config import ALLOWED_USER_IDS, DEFAULT_MODEL, PROJECTS_DIR
+from .config import ALLOWED_USER_IDS, DEFAULT_MODEL, PROJECTS_DIR, WORK_EXEC_TIMEOUT
 from .inbox import log_inbox
 from .jobs import get_default_queue
 from .storage import KNOWN_PROVIDERS, storage
@@ -62,7 +65,10 @@ HELP_TEXT = (
     "/pwd — текущий путь\n\n"
     "<b>Выполнение</b>\n"
     "/exec &lt;команда&gt; — bash в текущем проекте\n"
-    "/git &lt;аргументы&gt; — то же что /exec git ...\n\n"
+    "/git &lt;аргументы&gt; — то же что /exec git ...\n"
+    "/work — пакетный терминал: пришлёшь список команд одним сообщением, "
+    "я выполню их по порядку без жёсткого таймаута\n"
+    "/cancel — выйти из режима /work\n\n"
     "<b>Мозги</b>\n"
     "/brain — кто сейчас в седле (auto / devin)\n"
     "/setbrain auto|devin — переключить. devin = бот логирует в inbox.log и не отвечает автоматически\n"
@@ -338,6 +344,179 @@ async def cmd_reset(message: Message) -> None:
         return
     storage.clear_history(message.from_user.id)
     await message.answer("Контекст разговора очищен")
+
+
+# ---- /work — sequential batch terminal ----------------------------------
+
+
+class WorkStates(StatesGroup):
+    awaiting_commands = State()
+
+
+@router.message(Command("cancel"))
+async def cmd_cancel(message: Message, state: FSMContext) -> None:
+    current = await state.get_state()
+    if current is None:
+        await message.answer("Нечего отменять.")
+        return
+    await state.clear()
+    await message.answer("Отменено.")
+
+
+@router.message(Command("work"))
+async def cmd_work(message: Message, state: FSMContext) -> None:
+    if not _is_authorized(message):
+        await _deny(message)
+        return
+    await state.set_state(WorkStates.awaiting_commands)
+    await message.answer(
+        "Жду команды списком (по одной на строку). Пришли одним сообщением — "
+        "выполню по порядку, ждя завершения каждой. Таймаут на команду снят "
+        "(до 1 часа).\n\n"
+        "Поддерживаю: <code>/exec</code>, <code>/clone</code>, "
+        "<code>/project</code>, <code>/cd</code>, <code>/git</code>. "
+        "Строка без <code>/</code> — bash в текущем проекте. Пустые строки и "
+        "<code>#</code>-комментарии пропускаю.\n\n"
+        "Выйти из режима: /cancel"
+    )
+
+
+async def _work_run_line(message: Message, line: str) -> None:
+    """Run one line of a /work batch and send its output back.
+
+    Recognises the same slash-commands as the bot's normal interface
+    (``/exec``, ``/clone``, ``/project``, ``/cd``, ``/git``), plus bare bash
+    lines without a leading slash. Each shell command is given
+    ``WORK_EXEC_TIMEOUT`` instead of the global ``EXEC_TIMEOUT``.
+    """
+    user_id = message.from_user.id if message.from_user else 0
+    header = f"<b>$ {_html_escape(line)}</b>"
+    parts = line.split(maxsplit=1)
+    cmd = parts[0]
+    rest = parts[1].strip() if len(parts) > 1 else ""
+    cwd = storage.get_cwd(user_id)
+
+    if cmd in ("/exec", "/git"):
+        if cwd is None:
+            await message.answer(
+                f"{header}\nСначала выбери проект: /projects или /clone"
+            )
+            return
+        shell_cmd = rest if cmd == "/exec" else f"git {rest}"
+        if not shell_cmd.strip() or shell_cmd.strip() == "git":
+            await message.answer(f"{header}\nПустая команда")
+            return
+        await message.answer(header)
+        with contextlib.suppress(Exception):
+            await message.bot.send_chat_action(message.chat.id, "typing")
+        try:
+            result = await exec_bash(cwd, shell_cmd, timeout=WORK_EXEC_TIMEOUT)
+        except ToolError as exc:
+            await message.answer(f"Ошибка: {_html_escape(str(exc))}")
+            return
+        await _send_long(message, result)
+        return
+
+    if cmd == "/clone":
+        args = rest.split()
+        if not args:
+            await message.answer(f"{header}\nИспользование: /clone &lt;url&gt; [имя]")
+            return
+        url = args[0]
+        name = args[1] if len(args) > 1 else None
+        await message.answer(f"{header}\nКлонирую…")
+        try:
+            dest = await clone_repo(url, name)
+        except ToolError as exc:
+            await message.answer(f"Ошибка: {_html_escape(str(exc))}")
+            return
+        storage.set_cwd(user_id, dest)
+        await message.answer(
+            f"Готово. Проект: <b>{dest.name}</b>\ncwd: <code>{dest}</code>"
+        )
+        return
+
+    if cmd == "/project":
+        if not rest:
+            await message.answer(f"{header}\nИспользование: /project &lt;имя&gt;")
+            return
+        target = PROJECTS_DIR / rest
+        if not target.exists():
+            await message.answer(
+                f"{header}\nПроект <code>{_html_escape(rest)}</code> не найден"
+            )
+            return
+        storage.set_cwd(user_id, target)
+        await message.answer(f"{header}\ncwd: <code>{target}</code>")
+        return
+
+    if cmd == "/cd":
+        if cwd is None:
+            await message.answer(f"{header}\nСначала выбери проект")
+            return
+        rel = rest or "."
+        target = (cwd / rel).resolve()
+        project_root = project_root_for(cwd).resolve()
+        if project_root not in target.parents and target != project_root:
+            await message.answer(f"{header}\nНельзя выйти за пределы проекта")
+            return
+        if not target.exists() or not target.is_dir():
+            await message.answer(
+                f"{header}\nНе найдена директория: <code>{_html_escape(str(target))}</code>"
+            )
+            return
+        storage.set_cwd(user_id, target)
+        await message.answer(f"{header}\ncwd: <code>{target}</code>")
+        return
+
+    if cmd.startswith("/"):
+        await message.answer(
+            f"{header}\nКоманда <code>{_html_escape(cmd)}</code> не поддерживается в /work."
+        )
+        return
+
+    # Bare bash line — no leading slash.
+    if cwd is None:
+        await message.answer(
+            f"{header}\nСначала выбери проект: /projects или /clone"
+        )
+        return
+    await message.answer(header)
+    with contextlib.suppress(Exception):
+        await message.bot.send_chat_action(message.chat.id, "typing")
+    try:
+        result = await exec_bash(cwd, line, timeout=WORK_EXEC_TIMEOUT)
+    except ToolError as exc:
+        await message.answer(f"Ошибка: {_html_escape(str(exc))}")
+        return
+    await _send_long(message, result)
+
+
+@router.message(StateFilter(WorkStates.awaiting_commands), F.text)
+async def capture_work_batch(message: Message, state: FSMContext) -> None:
+    if not _is_authorized(message):
+        await _deny(message)
+        return
+    raw = (message.text or "").strip()
+    if not raw:
+        await message.answer("Пустое сообщение. Пришли команды или /cancel.")
+        return
+    lines = [ln.strip() for ln in raw.splitlines()]
+    lines = [ln for ln in lines if ln and not ln.startswith("#")]
+    if not lines:
+        await message.answer("Нечего выполнять. /cancel чтобы выйти.")
+        return
+    await message.answer(f"Принял <b>{len(lines)}</b> команд(ы). Выполняю по порядку…")
+    for line in lines:
+        try:
+            await _work_run_line(message, line)
+        except Exception as exc:  # noqa: BLE001 — report and continue with the batch
+            logger.exception("/work line failed: %s", line)
+            await message.answer(f"Ошибка строки: {_html_escape(str(exc))}")
+        # Tiny pause so Telegram doesn't rate-limit us on bursty output.
+        await asyncio.sleep(0.2)
+    await state.clear()
+    await message.answer("Готово. Все команды выполнены. /work — новая серия.")
 
 
 # ---- /dl, /jobs (Lilush pipeline) ---------------------------------------
